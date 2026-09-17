@@ -1,0 +1,11 @@
+# 网络安全检测平台 依赖（更新需同步 README）
+# 安装：.venv\Scripts\python.exe -m pip install -r requirements.txt
+Flask==3.1.3
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.52
+Werkzeug==3.1.8
+requests==2.34.2
+waitress==3.0.2
+# M3 机器学习（特征提取 / 孤立森林 / K-means）
+scikit-learn==1.9.1
+pandas==3.0.5

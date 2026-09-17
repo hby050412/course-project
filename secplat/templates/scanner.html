@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}主动扫描 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">主动扫描</h5>
+    <span class="small text-muted">授权范围内目标：{{ stats.allowed_hosts }}</span>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">扫描目标</div>
+            <div class="stat-value">{{ stats.targets }}</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">扫描任务</div>
+            <div class="stat-value">{{ stats.tasks }}</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">累计漏洞发现</div>
+            <div class="stat-value sev-high">{{ stats.findings }}</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">运行中任务</div>
+            <div class="stat-value">{{ stats.running }}</div>
+        </div></div>
+    </div>
+</div>
+
+<!-- 目标列表 -->
+<div class="card stat-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span>① 扫描目标</span>
+        <span class="small text-muted">⚠️ 仅限对自己拥有或已获书面授权的系统扫描</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th style="width:50px">ID</th><th>名称</th><th>地址</th>
+                <th style="width:110px">状态</th><th style="width:170px">最近扫描</th>
+                <th style="width:300px">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for t in targets %}
+            <tr>
+                <td>{{ t.id }}</td>
+                <td>{{ t.name }}</td>
+                <td class="mono">{{ t.url }}</td>
+                <td>
+                    {% if t.status == 'scanning' %}<span class="badge bg-warning text-dark">扫描中</span>
+                    {% else %}<span class="badge bg-secondary">空闲</span>{% endif %}
+                </td>
+                <td class="small text-muted">{{ t.last_scan_at or '（未扫描）' }}</td>
+                <td>
+                    <div class="d-flex gap-1 align-items-center flex-wrap">
+                        <form method="post" action="{{ url_for('scanner.start_scan', target_id=t.id) }}"
+                              class="d-flex gap-1 align-items-center flex-wrap">
+                            {% for d in detectors %}
+                            <div class="form-check form-check-inline me-1">
+                                <input class="form-check-input" type="checkbox" name="detectors"
+                                       value="{{ d.id }}" id="det{{ t.id }}_{{ d.id }}" checked>
+                                <label class="form-check-label small" for="det{{ t.id }}_{{ d.id }}"
+                                       title="{{ d.description }}">{{ d.name }}</label>
+                            </div>
+                            {% endfor %}
+                            <button class="btn btn-sm btn-primary">开始扫描</button>
+                        </form>
+                        <form method="post" action="{{ url_for('scanner.delete_target', target_id=t.id) }}"
+                              onsubmit="return confirm('确认删除该目标及其扫描记录？')">
+                            <button class="btn btn-sm btn-outline-secondary">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-4">暂无目标，请在下方添加</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <!-- 新建目标 -->
+    <div class="col-lg-5">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white">② 添加扫描目标</div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('scanner.create_target') }}">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">目标地址</label>
+                        <input type="text" name="url" class="form-control form-control-sm"
+                               placeholder="http://127.0.0.1:5050" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">名称（可选）</label>
+                        <input type="text" name="name" class="form-control form-control-sm"
+                               placeholder="如：本地漏洞靶场">
+                    </div>
+                    <p class="small text-muted mb-2">
+                        💡 演示用靶场：<code>.venv\Scripts\python.exe target_lab/app.py</code>
+                        （地址 http://127.0.0.1:5050，内含 SQLi/XSS/敏感文件等预置漏洞）<br>
+                        🔒 出于合规考虑，只允许扫描 config.py 中 <code>SCAN_ALLOWED_HOSTS</code> 登记的主机。
+                    </p>
+                    <button class="btn btn-primary btn-sm">添加目标</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 可用检测器 -->
+    <div class="col-lg-7">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white">③ 检测能力（每个检测器独立实现、可单独启停）</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <thead class="table-light"><tr><th style="width:150px">检测器</th><th>说明</th></tr></thead>
+                    <tbody>
+                    {% for d in detectors %}
+                    <tr><td><span class="badge bg-dark">{{ d.name }}</span></td>
+                        <td class="small">{{ d.description }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                <p class="small text-muted mt-2 mb-0">
+                    扫描前先做信息收集（响应头 / 技术栈指纹 / robots.txt / 目录探测），
+                    其结果会展示在任务详情页，并供检测器复用（避免重复请求）。
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 任务历史 -->
+<div class="card stat-card">
+    <div class="card-header bg-white">④ 扫描任务</div>
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th style="width:60px">任务</th><th>目标</th><th style="width:100px">状态</th>
+                <th style="width:220px">漏洞统计</th><th style="width:110px">请求数</th>
+                <th style="width:160px">开始时间</th><th style="width:150px">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for t in tasks %}
+            <tr data-task="{{ t.id }}">
+                <td>#{{ t.id }}</td>
+                <td>
+                    {% set tg = target_map.get(t.target_id) %}
+                    {{ tg.name if tg else '（目标已删除）' }}
+                    <div class="small text-muted mono">{{ tg.url if tg else '' }}</div>
+                </td>
+                <td class="task-status">
+                    {% if t.status == 'running' %}<span class="badge bg-warning text-dark">扫描中…</span>
+                    {% elif t.status == 'done' %}<span class="badge bg-success">已完成</span>
+                    {% elif t.status == 'failed' %}<span class="badge bg-danger">失败</span>
+                    {% else %}<span class="badge bg-secondary">等待中</span>{% endif %}
+                </td>
+                <td class="task-summary">
+                    {% set s = t.finding_summary or {} %}
+                    {% if s.total is defined and s.total is not none %}
+                        <span class="badge bg-danger">严重 {{ s.by_severity.get('critical', 0) }}</span>
+                        <span class="badge bg-danger">高危 {{ s.by_severity.get('high', 0) }}</span>
+                        <span class="badge bg-warning text-dark">中危 {{ s.by_severity.get('mid', 0) }}</span>
+                        <span class="badge bg-secondary">共 {{ s.total }}</span>
+                    {% elif s.phase == 'info' %}<span class="small text-muted">信息收集中…</span>
+                    {% elif s.phase == 'detect' %}<span class="small text-muted">漏洞检测中…</span>
+                    {% elif s.error %}<span class="small text-danger">{{ s.error }}</span>
+                    {% else %}<span class="small text-muted">—</span>{% endif %}
+                </td>
+                <td class="task-requests small text-muted">{{ (t.finding_summary or {}).get('request_count', '—') }}</td>
+                <td class="small text-muted">{{ t.started_at or t.finished_at or '—' }}</td>
+                <td>
+                    <div class="d-flex gap-1">
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="{{ url_for('scanner.task_detail', task_id=t.id) }}">查看结果</a>
+                        <form method="post" action="{{ url_for('scanner.delete_task', task_id=t.id) }}"
+                              onsubmit="return confirm('确认删除该扫描任务？')">
+                            <button class="btn btn-sm btn-outline-secondary">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">暂无扫描任务</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 有任务在运行时，每 2 秒轮询任务状态（扫描完成后自动显示漏洞统计）
+(function () {
+    const running = {{ tasks | selectattr('status', 'equalto', 'running') | list | length }};
+    if (!running) return;
+    setInterval(async () => {
+        let stillRunning = 0;
+        for (const row of document.querySelectorAll('tr[data-task]')) {
+            const badge = row.querySelector('.task-status .badge');
+            if (!badge || !badge.textContent.includes('扫描中')) continue;
+            try {
+                const resp = await fetch(`/scanner/api/tasks/${row.dataset.task}`);
+                const data = await resp.json();
+                if (data.status === 'running' || data.status === 'pending') { stillRunning++; continue; }
+                if (data.status === 'done') {
+                    badge.className = 'badge bg-success';
+                    badge.textContent = '已完成';
+                    const s = data.by_severity || {};
+                    row.querySelector('.task-summary').innerHTML =
+                        `<span class="badge bg-danger">严重 ${s.critical || 0}</span>
+                         <span class="badge bg-danger">高危 ${s.high || 0}</span>
+                         <span class="badge bg-warning text-dark">中危 ${s.mid || 0}</span>
+                         <span class="badge bg-secondary">共 ${data.total || 0}</span>`;
+                    row.querySelector('.task-requests').textContent =
+                        data.request_count != null ? data.request_count : '—';
+                } else {
+                    badge.className = 'badge bg-danger';
+                    badge.textContent = '失败';
+                    row.querySelector('.task-summary').innerHTML =
+                        `<span class="small text-danger">${data.error || '扫描失败'}</span>`;
+                }
+            } catch (e) { stillRunning++; }
+        }
+        if (!stillRunning) location.reload();
+    }, 2000);
+})();
+</script>
+{% endblock %}

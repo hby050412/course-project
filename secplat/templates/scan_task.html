@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}扫描结果 #{{ task.id }} - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">扫描任务 #{{ task.id }}
+        {% if task.status == 'running' %}<span class="badge bg-warning text-dark ms-2">扫描中…</span>
+        {% elif task.status == 'done' %}<span class="badge bg-success ms-2">已完成</span>
+        {% elif task.status == 'failed' %}<span class="badge bg-danger ms-2">失败</span>
+        {% else %}<span class="badge bg-secondary ms-2">等待中</span>{% endif %}
+    </h5>
+    <div class="d-flex gap-2">
+        {% if task.status != 'running' %}
+        <form method="post" action="{{ url_for('report.generate') }}">
+            <input type="hidden" name="task_id" value="{{ task.id }}">
+            <input type="hidden" name="format" value="html">
+            <button class="btn btn-sm btn-primary">生成报告</button>
+        </form>
+        <form method="post" action="{{ url_for('scanner.simulate_attack', task_id=task.id) }}"
+              onsubmit="return confirm('将针对本任务发现的漏洞生成攻击流量，并送入真实检测链路（规则引擎会真实产生告警）。确认继续？')">
+            <button class="btn btn-sm btn-warning">⚡ 模拟攻击（闭环演示）</button>
+        </form>
+        {% endif %}
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('report.index') }}">报告列表</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('scanner.index') }}">← 返回扫描列表</a>
+    </div>
+</div>
+
+<!-- 任务概要 -->
+<div class="card stat-card mb-4">
+    <div class="card-body py-3">
+        <div class="row g-3 small">
+            <div class="col-md-3"><span class="text-muted">目标：</span>
+                {{ target.name if target else '（已删除）' }}
+                <div class="mono">{{ target.url if target else '' }}</div></div>
+            <div class="col-md-3"><span class="text-muted">检测器：</span>
+                {% for d in task.detector_ids or [] %}<span class="badge bg-dark">{{ d }}</span>{% endfor %}
+                <div class="text-muted">并发 {{ task.concurrency }} · 请求 {{ summary.request_count or 0 }} 次
+                    · 耗时 {{ summary.elapsed or 0 }}s</div></div>
+            <div class="col-md-3"><span class="text-muted">开始：</span>{{ task.started_at or '—' }}
+                <div><span class="text-muted">结束：</span>{{ task.finished_at or '—' }}</div></div>
+            <div class="col-md-3"><span class="text-muted">漏洞统计：</span>
+                <div>
+                    <span class="badge bg-danger">严重 {{ summary.by_severity.get('critical', 0) if summary.by_severity else 0 }}</span>
+                    <span class="badge bg-danger">高危 {{ summary.by_severity.get('high', 0) if summary.by_severity else 0 }}</span>
+                    <span class="badge bg-warning text-dark">中危 {{ summary.by_severity.get('mid', 0) if summary.by_severity else 0 }}</span>
+                    <span class="badge bg-primary">低危 {{ summary.by_severity.get('low', 0) if summary.by_severity else 0 }}</span>
+                    <span class="badge bg-secondary">共 {{ summary.total or 0 }}</span>
+                </div>
+            </div>
+        </div>
+        {% if summary.detector_stats %}
+        <div class="mt-2 small text-muted">
+            各检测器：
+            {% for did, st in summary.detector_stats.items() %}
+            <span class="badge {% if st.status == 'done' %}bg-light text-dark{% else %}bg-danger{% endif %}">
+                {{ did }}：{{ st.status }}{% if st.findings is defined %}（{{ st.findings }} 条）{% endif %}
+                {% if st.error %}· {{ st.error }}{% endif %}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if summary.error %}
+        <div class="alert alert-danger py-2 mt-2 mb-0 small">扫描失败：{{ summary.error }}</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 主被动闭环状态 -->
+{% if closure and closure.correlatable %}
+<div class="card stat-card mb-4 border-start border-4 border-info">
+    <div class="card-body py-2">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <strong>🔗 主被动闭环</strong>
+                <span class="small text-muted ms-2">
+                    {{ closure.correlatable }} 个漏洞可与日志关联 ·
+                    其中 <b class="{{ 'text-danger' if closure.exploited else 'text-success' }}">
+                    {{ closure.exploited }}</b> 个已在日志中被实际攻击（{{ closure.events }} 条攻击日志 /
+                    {{ closure.alerts }} 条告警）
+                </span>
+            </div>
+            {% if not closure.events %}
+            <form method="post" action="{{ url_for('scanner.simulate_attack', task_id=task.id) }}">
+                <button class="btn btn-sm btn-warning">⚡ 模拟攻击，验证闭环</button>
+            </form>
+            {% endif %}
+        </div>
+        <div class="small text-muted mt-1">
+            说明：主动扫描发现的漏洞，若在被动日志中检出同类攻击，即构成"扫描发现 → 攻击发生 →
+            日志告警"的闭环；点击每条漏洞卡片下的「关联日志」可查看具体攻击记录。
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 漏洞发现 -->
+<h6 class="mb-2">漏洞发现（{{ findings | length }} 条）</h6>
+{% for f in findings %}
+<div class="card stat-card mb-3 border-start border-4
+    {% if f.severity == 'critical' %}border-danger{% elif f.severity == 'high' %}border-danger
+    {% elif f.severity == 'mid' %}border-warning{% else %}border-secondary{% endif %}">
+    <div class="card-body py-2">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <span class="sev-{{ f.severity }}">[{{ severity_labels.get(f.severity, f.severity) }}]</span>
+                <strong>{{ f.vuln_type | upper }}</strong>
+                <span class="mono small ms-2">{{ f.url }}</span>
+            </div>
+            <span class="small text-muted">{{ f.detected_at }}</span>
+        </div>
+        <div class="small mt-1">
+            <span class="text-muted">参数：</span><code>{{ f.param or '-' }}</code>
+            <span class="text-muted ms-3">Payload：</span><code>{{ f.payload or '-' }}</code>
+        </div>
+        {% if f.evidence %}
+        <div class="small mt-1"><span class="text-muted">证据：</span>
+            <span class="mono evidence-box">{{ f.evidence }}</span></div>
+        {% endif %}
+        <div class="small mt-1">{{ f.description }}</div>
+        {% if f.fix_suggestion %}
+        <details class="small mt-1">
+            <summary class="text-primary">修复建议</summary>
+            <div class="text-muted mt-1">{{ f.fix_suggestion }}</div>
+        </details>
+        {% endif %}
+
+        {# ---- 主被动关联：该漏洞是否已被实际攻击 ---- #}
+        {% set corr = correlations.get(f.id) if correlations else None %}
+        {% if corr %}
+          {% if corr.correlatable %}
+          <details class="small mt-1">
+            <summary class="{{ 'text-danger' if corr.closed else 'text-muted' }}">
+              关联日志/告警：
+              {% if corr.closed %}
+                <b>已在日志中检出 {{ corr.events }} 条针对该地址的攻击</b>
+                {% if corr.alerts %}· 关联告警 {{ corr.alerts }} 条{% endif %}
+                {% if corr.sources %}（来源 {{ corr.sources | join('、') }}）{% endif %}
+              {% else %}
+                暂无针对该地址的攻击记录
+              {% endif %}
+            </summary>
+            {% if corr.sample %}
+            <table class="table table-sm mt-1 mb-0">
+              <thead class="table-light"><tr><th style="width:170px">时间</th><th style="width:130px">来源 IP</th>
+                  <th>请求</th><th style="width:70px">状态</th></tr></thead>
+              <tbody>
+              {% for e in corr.sample %}
+              <tr><td class="small text-muted">{{ e.ts }}</td><td class="mono small">{{ e.src_ip }}</td>
+                  <td class="mono small">{{ e.method }} {{ e.url }}</td>
+                  <td class="small">{{ e.status_code }}</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+            <div class="text-muted mt-1">
+              被动侧判定依据：{{ corr.label }}特征（与主动检测器共用同一份特征库）；
+              完整记录见「日志」页按来源 IP 筛选。
+            </div>
+            {% endif %}
+          </details>
+          {% else %}
+          <div class="small text-muted mt-1">关联日志：{{ corr.reason }}</div>
+          {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="card stat-card mb-4"><div class="card-body text-center text-muted py-4">
+    {% if task.status == 'running' %}扫描进行中，稍后刷新查看结果…{% else %}本次扫描未发现漏洞{% endif %}
+</div></div>
+{% endfor %}
+
+<!-- 信息收集 -->
+<h6 class="mb-2 mt-4">信息收集</h6>
+<div class="row g-3">
+    {% set headers = info.get('headers') %}
+    <div class="col-lg-6">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white">响应头分析</div>
+            <div class="card-body small">
+                {% if headers %}
+                <div>Server：<code>{{ headers.server or '（未返回）' }}</code></div>
+                {% if headers.powered_by %}<div>X-Powered-By：<code>{{ headers.powered_by }}</code></div>{% endif %}
+                {% if headers.present_security %}
+                <div class="mt-1 text-muted">已设置的安全头：
+                    {% for k, v in headers.present_security.items() %}<span class="badge bg-success">{{ k }}</span>{% endfor %}
+                </div>
+                {% endif %}
+                <div class="mt-1 text-muted">缺失的安全头：</div>
+                <ul class="mb-0 ps-3">
+                    {% for m in headers.missing_security %}
+                    <li><code>{{ m.header }}</code> <span class="text-muted">（{{ m.purpose }}）</span></li>
+                    {% endfor %}
+                </ul>
+                {% else %}<span class="text-muted">无数据</span>{% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% set cms = info.get('cms') %}
+    <div class="col-lg-6">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white">技术栈 / CMS 指纹</div>
+            <div class="card-body small">
+                {% if cms and cms.fingerprints %}
+                <table class="table table-sm mb-0">
+                    <thead class="table-light"><tr><th>组件</th><th>类别</th><th>版本</th><th>依据</th></tr></thead>
+                    <tbody>
+                    {% for fp in cms.fingerprints %}
+                    <tr><td><span class="badge bg-dark">{{ fp.name }}</span></td>
+                        <td class="text-muted">{{ fp.category }}</td>
+                        <td>{{ fp.version or '—' }}</td>
+                        <td class="text-muted small">{{ fp.evidence }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}<span class="text-muted">未识别出已知组件</span>{% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% set robots = info.get('robots') %}
+    <div class="col-lg-6">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white">robots.txt 线索</div>
+            <div class="card-body small">
+                {% if robots %}
+                <div class="text-muted">敏感的 Disallow 条目（往往是后台/备份/配置路径）：</div>
+                <ul class="mb-1 ps-3">
+                    {% for d in robots.disallow %}<li><code>{{ d }}</code></li>{% endfor %}
+                </ul>
+                {% if robots.sitemaps %}<div class="text-muted">Sitemap：{{ robots.sitemaps | join(', ') }}</div>{% endif %}
+                {% else %}<span class="text-muted">未提供 robots.txt</span>{% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% set dirs = info.get('dirs') %}
+    <div class="col-lg-6">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white">目录探测
+                {% if dirs and dirs.summary %}
+                <span class="small text-muted ms-2">可访问 {{ dirs.summary.accessible }} ·
+                    禁止 {{ dirs.summary.forbidden }} · 跳转 {{ dirs.summary.redirect }}
+                    （共探测 {{ dirs.summary.total }} 个）</span>
+                {% endif %}
+            </div>
+            <div class="card-body small" style="max-height:280px; overflow:auto">
+                {% if dirs and dirs['items'] %}
+                <table class="table table-sm mb-0">
+                    <thead class="table-light"><tr><th>路径</th><th style="width:70px">状态</th><th style="width:80px">大小</th></tr></thead>
+                    <tbody>
+                    {# 注意：必须用 dirs['items'] —— 点号写法会取到 dict.items 方法 #}
+                    {% for item in dirs['items'] %}
+                    <tr><td class="mono">{{ item.path }}</td>
+                        <td>{% if item.status == 200 %}<span class="badge bg-success">{{ item.status }}</span>
+                            {% elif item.status == 403 %}<span class="badge bg-warning text-dark">{{ item.status }}</span>
+                            {% else %}<span class="badge bg-secondary">{{ item.status }}</span>{% endif %}</td>
+                        <td class="text-muted">{{ item.size }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}<span class="text-muted">未探测到可访问路径</span>{% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 任务运行中时轮询状态，完成后自动刷新页面
+(function () {
+    if ({{ 'true' if task.status == 'running' else 'false' }}) {
+        setInterval(async () => {
+            const resp = await fetch('/scanner/api/tasks/{{ task.id }}');
+            const data = await resp.json();
+            if (data.status !== 'running' && data.status !== 'pending') location.reload();
+        }, 2000);
+    }
+})();
+</script>
+{% endblock %}

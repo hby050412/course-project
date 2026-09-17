@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}规则管理 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">规则管理 <span class="text-muted small">共 {{ rules|length }} 条</span></h5>
+    <div>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('rules.create') }}">+ 新建规则</a>
+        <form method="post" action="{{ url_for('rules.reset_builtin') }}" class="d-inline"
+              onsubmit="return confirm('将 15 条内置规则恢复为默认参数与启用状态（自定义规则不受影响），确认？')">
+            <button class="btn btn-sm btn-outline-secondary">重置内置规则</button>
+        </form>
+    </div>
+</div>
+
+<!-- 规则列表 -->
+<div class="card stat-card mb-4">
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th style="width:50px">ID</th>
+                <th>规则名称</th>
+                <th style="width:90px">类别</th>
+                <th style="width:120px">类型</th>
+                <th style="width:70px">级别</th>
+                <th style="width:120px">触发条件</th>
+                <th style="width:80px">状态</th>
+                <th style="width:190px">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in rules %}
+            <tr class="{% if not r.enabled %}table-secondary opacity-75{% endif %}">
+                <td>{{ r.id }}</td>
+                <td>
+                    {{ r.name }}
+                    {% if r.is_builtin %}<span class="badge bg-light text-secondary border">内置</span>{% endif %}
+                </td>
+                <td class="small text-muted">{{ r.category }}</td>
+                <td class="small">
+                    {% if r.rule_type == 'regex' %}正则
+                    {% elif r.rule_type == 'aggregate' %}聚合
+                    {% else %}复合{% endif %}
+                </td>
+                <td><span class="sev-{{ r.severity }}">{{ r.severity }}</span></td>
+                <td class="small text-muted">
+                    {% if r.rule_type in ('aggregate', 'composite') %}
+                        {{ r.time_window }}s 内 {{ r.threshold }} 次
+                    {% else %}
+                        {{ pattern_labels.get(r.pattern, r.pattern or '') }}
+                    {% endif %}
+                </td>
+                <td>
+                    {% if r.enabled %}<span class="badge bg-success">启用</span>
+                    {% else %}<span class="badge bg-secondary">停用</span>{% endif %}
+                </td>
+                <td>
+                    <div class="d-flex gap-1">
+                        <form method="post" action="{{ url_for('rules.toggle', rule_id=r.id) }}">
+                            <button class="btn btn-sm {% if r.enabled %}btn-outline-warning{% else %}btn-outline-success{% endif %}">
+                                {% if r.enabled %}停用{% else %}启用{% endif %}</button>
+                        </form>
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="{{ url_for('rules.edit', rule_id=r.id) }}">编辑</a>
+                        {% if not r.is_builtin %}
+                        <form method="post" action="{{ url_for('rules.delete', rule_id=r.id) }}"
+                              onsubmit="return confirm('确认删除规则「{{ r.name }}」？')">
+                            <button class="btn btn-sm btn-outline-secondary">删除</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ⭐ 规则测试工具（答辩演示亮点） -->
+<div class="card stat-card">
+    <div class="card-header bg-white">
+        <strong>🧪 规则测试工具</strong>
+        <span class="text-muted small ms-2">粘贴一条日志，立即验证规则是否命中（不需要改代码、不需要等日志流）</span>
+    </div>
+    <div class="card-body">
+        <form method="post" action="{{ url_for('rules.test') }}">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label small text-muted">① 选择规则</label>
+                    <select name="rule_id" class="form-select form-select-sm">
+                        <option value="">-- 请选择规则 --</option>
+                        <optgroup label="内置规则">
+                            {% for r in rules if r.is_builtin %}
+                            <option value="{{ r.id }}" {% if test_rule and test_rule.id == r.id %}selected{% endif %}>{{ r.name }}</option>
+                            {% endfor %}
+                        </optgroup>
+                        {% set custom = rules|selectattr('is_builtin', 'equalto', false)|list %}
+                        {% if custom %}
+                        <optgroup label="自定义规则">
+                            {% for r in custom %}
+                            <option value="{{ r.id }}" {% if test_rule and test_rule.id == r.id %}selected{% endif %}>{{ r.name }}</option>
+                            {% endfor %}
+                        </optgroup>
+                        {% endif %}
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label small text-muted">
+                        ② 粘贴日志内容
+                        <a href="javascript:void(0)" class="ms-2 small" onclick="fillSample('sqli')">填充SQLi示例</a>
+                        <a href="javascript:void(0)" class="ms-2 small" onclick="fillSample('brute')">填充SSH爆破示例</a>
+                    </label>
+                    <textarea name="sample_line" id="sampleLine" class="form-control form-control-sm mono"
+                              rows="3" placeholder="示例：192.168.1.50 - - [01/Mar/2026:08:14:22 +0800] &quot;GET /index.php?id=1%27+OR+%271%27%3D%271 HTTP/1.1&quot; 200 1234 &quot;-&quot; &quot;Mozilla/5.0&quot;">{{ test_sample or '' }}</textarea>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-sm mt-3">执行测试</button>
+        </form>
+
+        {% if test_result %}
+        <hr>
+        <div class="alert {% if test_result.matched %}alert-success{% elif test_result.parsed %}alert-warning{% else %}alert-danger{% endif %} mb-0">
+            <strong>
+            {% if test_result.matched %}✅ 命中规则「{{ test_rule.name }}」
+            {% elif test_result.parsed %}⚪ 未命中
+            {% else %}❌ 解析失败{% endif %}
+            </strong>
+            <div class="mt-1">{{ test_result.reason }}</div>
+            {% if test_result.detail %}
+            <div class="mono small mt-2 text-break">证据：{{ test_result.detail }}</div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SAMPLES = {
+    sqli: '192.168.1.50 - - [01/Mar/2026:08:14:22 +0800] "GET /index.php?id=1%27+OR+%271%27%3D%271 HTTP/1.1" 200 1234 "-" "Mozilla/5.0 (Windows NT 10.0)"',
+    brute: 'Sep 12 02:14:01 server sshd[4521]: Failed password for root from 203.0.113.5 port 33421 ssh2'
+};
+function fillSample(kind) {
+    document.getElementById('sampleLine').value = SAMPLES[kind] || '';
+}
+</script>
+{% endblock %}

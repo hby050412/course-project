@@ -1,0 +1,52 @@
+/* 全局样式（配合 Bootstrap 5） */
+body {
+    background-color: #f5f6f8;
+    font-size: 14px;
+}
+
+/* 统计卡片 */
+.stat-card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+.stat-card .stat-value {
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.2;
+}
+.stat-card .stat-label {
+    color: #6c757d;
+    font-size: 13px;
+}
+
+/* 表格紧凑化（日志/告警列表） */
+.table-compact td, .table-compact th {
+    padding: .35rem .5rem;
+    vertical-align: middle;
+    font-size: 13px;
+}
+
+/* 严重级别色标 */
+.sev-critical  { color: #8b0000; font-weight: 700; }
+.sev-high      { color: #dc3545; font-weight: 600; }
+.sev-mid       { color: #fd7e14; font-weight: 600; }
+.sev-low       { color: #0d6efd; }
+.sev-info      { color: #6c757d; }
+
+/* 日志类型徽标 */
+.badge-ssh  { background-color: #6f42c1; }
+.badge-web  { background-color: #0d6efd; }
+.badge-scan { background-color: #20c997; }
+
+/* 等宽字体（原始日志行） */
+.mono {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+/* 导航品牌 */
+.navbar-brand {
+    font-weight: 600;
+    letter-spacing: .5px;
+}

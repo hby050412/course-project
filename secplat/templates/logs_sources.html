@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}日志源 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">日志源管理</h5>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('logs.list_events') }}">← 返回日志</a>
+</div>
+
+<!-- 日志源列表 -->
+<div class="card stat-card mb-4">
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th style="width:50px">ID</th><th>名称</th><th style="width:80px">类型</th>
+                <th style="width:200px">剧本 / 文件</th><th style="width:100px">状态</th>
+                <th style="width:90px">已解析</th><th style="width:110px">速率/时长</th>
+                <th style="width:240px">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for s in sources %}
+            <tr>
+                <td>{{ s.id }}</td>
+                <td>{{ s.name }}</td>
+                <td>
+                    {% if s.source_type == 'simulator' %}
+                    <span class="badge bg-primary">模拟器</span>
+                    {% else %}
+                    <span class="badge bg-secondary">文件导入</span>
+                    {% endif %}
+                </td>
+                <td class="mono text-truncate" style="max-width:200px" title="{{ s.scenario or s.file_path }}">
+                    {{ s.scenario or s.file_path or '' }}</td>
+                <td>
+                    {% if s.status == 'running' %}<span class="badge bg-success">运行中</span>
+                    {% elif s.status == 'finished' %}<span class="badge bg-info text-dark">已完成</span>
+                    {% elif s.status == 'pending' %}<span class="badge bg-warning text-dark">待导入</span>
+                    {% else %}<span class="badge bg-secondary">已停止</span>{% endif %}
+                </td>
+                <td>{{ s.total_parsed or 0 }}</td>
+                <td class="small text-muted">{{ s.rate }} 条/秒 · {{ s.duration }}s</td>
+                <td>
+                    <div class="d-flex gap-1">
+                    {% if s.source_type == 'simulator' %}
+                        {% if s.status == 'running' %}
+                        <form method="post" action="{{ url_for('logs.stop_source', source_id=s.id) }}">
+                            <button class="btn btn-sm btn-outline-danger">停止</button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{{ url_for('logs.start_source', source_id=s.id) }}">
+                            <button class="btn btn-sm btn-success">启动</button>
+                        </form>
+                        {% endif %}
+                    {% else %}
+                        <form method="post" action="{{ url_for('logs.do_import', source_id=s.id) }}">
+                            <button class="btn btn-sm btn-primary">执行导入</button>
+                        </form>
+                    {% endif %}
+                        <form method="post" action="{{ url_for('logs.delete_source', source_id=s.id) }}"
+                              onsubmit="return confirm('确认删除该日志源？（已入库的日志事件会保留）')">
+                            <button class="btn btn-sm btn-outline-secondary">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="text-center text-muted py-4">暂无日志源，请用下方表单创建</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- 新建模拟器 -->
+    <div class="col-lg-6">
+        <div class="card stat-card">
+            <div class="card-header bg-white">① 新建日志模拟器（生成演示数据）</div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('logs.create_source') }}">
+                    <input type="hidden" name="source_type" value="simulator">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">名称</label>
+                        <input type="text" name="name" class="form-control form-control-sm" placeholder="如：SSH 爆破演示">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">剧本</label>
+                        <select name="scenario" class="form-select form-select-sm">
+                            {% for key, label in scenarios.items() %}
+                            <option value="{{ key }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col">
+                            <label class="form-label small text-muted">速率（条/秒）</label>
+                            <input type="number" name="rate" class="form-control form-control-sm" value="20" min="1" max="500">
+                        </div>
+                        <div class="col">
+                            <label class="form-label small text-muted">时长（秒）</label>
+                            <input type="number" name="duration" class="form-control form-control-sm" value="60" min="1" max="3600">
+                        </div>
+                    </div>
+                    <p class="small text-muted mb-2">💡 快速演示建议：速率 50 × 时长 10 秒 = 约 500 条</p>
+                    <button class="btn btn-primary btn-sm">创建模拟器</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文件导入 -->
+    <div class="col-lg-6">
+        <div class="card stat-card">
+            <div class="card-header bg-white">② 导入日志文件（SSH / Web / 扫描，支持混合格式）</div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('logs.create_source') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="source_type" value="import_file">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">名称</label>
+                        <input type="text" name="name" class="form-control form-control-sm" placeholder="如：服务器样例日志">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">上传文件</label>
+                        <input type="file" name="log_file" class="form-control form-control-sm" accept=".log,.txt,.csv">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">或服务器本地路径（浏览器上传不便时）</label>
+                        <input type="text" name="file_path" class="form-control form-control-sm" placeholder="D:\logs\sample.log">
+                    </div>
+                    <p class="small text-muted mb-2">💡 上传的文件保存到 data/raw_logs/，创建后点「执行导入」解析入库</p>
+                    <button class="btn btn-primary btn-sm">创建导入源</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

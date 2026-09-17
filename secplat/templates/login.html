@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}登录 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center" style="margin-top: 9vh;">
+    <div class="col-md-4 col-lg-3">
+        <div class="card stat-card">
+            <div class="card-body p-4">
+                <h4 class="text-center mb-1">🛡️ 安全检测平台</h4>
+                <p class="text-center text-muted small mb-4">主被动结合 · 智能研判</p>
+
+                <form method="post" action="{{ url_for('auth.login') }}">
+                    <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">用户名</label>
+                        <input type="text" name="username" class="form-control" autofocus required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">密码</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">登 录</button>
+                </form>
+            </div>
+        </div>
+        <p class="text-center text-muted small mt-3">默认账号 admin / admin123，首次登录后请及时修改</p>
+    </div>
+</div>
+{% endblock %}

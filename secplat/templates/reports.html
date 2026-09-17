@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}漏洞报告 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">漏洞报告</h5>
+    <span class="small text-muted">自包含 HTML 报告 · 浏览器 Ctrl+P 可另存为 PDF</span>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">报告总数</div>
+            <div class="stat-value">{{ stats.total }}</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">HTML 报告</div>
+            <div class="stat-value">{{ stats.html }}</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">Markdown 报告</div>
+            <div class="stat-value">{{ stats.markdown }}</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="text-muted small">可生成的任务</div>
+            <div class="stat-value">{{ candidates | length }}</div>
+        </div></div>
+    </div>
+</div>
+
+{% if candidates %}
+<!-- 一键生成 -->
+<div class="card stat-card mb-4">
+    <div class="card-header bg-white">① 从扫描任务生成报告</div>
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr><th style="width:70px">任务</th><th>目标</th><th style="width:220px">扫描结果</th>
+                <th style="width:150px">完成时间</th><th style="width:260px">生成报告</th></tr>
+            </thead>
+            <tbody>
+            {% for t in candidates %}
+            {% set s = t.finding_summary or {} %}
+            <tr>
+                <td>#{{ t.id }}</td>
+                <td>
+                    {% set tg = target_map.get(t.target_id) %}
+                    {{ tg.name if tg else '（目标已删除）' }}
+                    <div class="small text-muted mono">{{ tg.url if tg else '' }}</div>
+                </td>
+                <td>
+                    <span class="badge bg-danger">严重 {{ s.by_severity.get('critical', 0) if s.by_severity else 0 }}</span>
+                    <span class="badge bg-danger">高危 {{ s.by_severity.get('high', 0) if s.by_severity else 0 }}</span>
+                    <span class="badge bg-warning text-dark">中危 {{ s.by_severity.get('mid', 0) if s.by_severity else 0 }}</span>
+                    <span class="badge bg-secondary">共 {{ s.total or 0 }}</span>
+                </td>
+                <td class="small text-muted">{{ t.finished_at or '—' }}</td>
+                <td>
+                    <div class="d-flex gap-1">
+                        <form method="post" action="{{ url_for('report.generate') }}">
+                            <input type="hidden" name="task_id" value="{{ t.id }}">
+                            <input type="hidden" name="format" value="html">
+                            <button class="btn btn-sm btn-primary">生成 HTML 报告</button>
+                        </form>
+                        <form method="post" action="{{ url_for('report.generate') }}">
+                            <input type="hidden" name="task_id" value="{{ t.id }}">
+                            <input type="hidden" name="format" value="markdown">
+                            <button class="btn btn-sm btn-outline-secondary">Markdown</button>
+                        </form>
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="{{ url_for('scanner.task_detail', task_id=t.id) }}">查看结果</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- 历史报告 -->
+<div class="card stat-card">
+    <div class="card-header bg-white">② 已生成报告</div>
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr><th style="width:60px">ID</th><th>目标</th><th style="width:90px">格式</th>
+                <th style="width:130px">整体风险</th><th>结论摘要</th>
+                <th style="width:150px">生成时间</th><th style="width:250px">操作</th></tr>
+            </thead>
+            <tbody>
+            {% for r in reports %}
+            {% set s = r.summary or {} %}
+            <tr>
+                <td>{{ r.id }}</td>
+                <td>
+                    {% set tg = target_map.get(r.target_id) %}
+                    {{ tg.name if tg else '（目标已删除）' }}
+                    <div class="small text-muted mono">{{ tg.url if tg else '' }}</div>
+                </td>
+                <td>
+                    {% if s.format == 'markdown' %}<span class="badge bg-secondary">Markdown</span>
+                    {% else %}<span class="badge bg-dark">HTML</span>{% endif %}
+                </td>
+                <td>
+                    <span class="sev-{{ s.risk or 'info' }}">
+                        {{ severity_labels.get(s.risk, s.risk or '—') }}</span>
+                </td>
+                <td class="small">{{ s.line or '—' }}</td>
+                <td class="small text-muted">{{ r.created_at }}</td>
+                <td>
+                    <div class="d-flex gap-1">
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="{{ url_for('report.view', report_id=r.id) }}" target="_blank">查看</a>
+                        <a class="btn btn-sm btn-outline-secondary"
+                           href="{{ url_for('report.download', report_id=r.id) }}">下载</a>
+                        <form method="post" action="{{ url_for('report.delete', report_id=r.id) }}"
+                              onsubmit="return confirm('确认删除该报告（含文件）？')">
+                            <button class="btn btn-sm btn-outline-secondary">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">
+                暂无报告{% if candidates %}，请在上方选择任务生成{% else %}——先到「主动扫描」页发起一次扫描{% endif %}
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<p class="small text-muted mt-3">
+    💡 HTML 报告为自包含页面（样式内联、不依赖外网），可直接双击打开；
+    在报告页按 <kbd>Ctrl+P</kbd> → 目标选择「另存为 PDF」即可导出 PDF 版。
+</p>
+{% endblock %}

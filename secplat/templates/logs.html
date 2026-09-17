@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}日志 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">日志事件</h5>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('logs.sources') }}">日志源管理 →</a>
+</div>
+
+<!-- 实时流 -->
+<div class="card stat-card mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+        <span>实时流 <span id="liveDot" class="badge bg-secondary">已停止</span>
+            <span class="text-muted small ms-2" id="liveCount"></span></span>
+        <button id="liveToggle" class="btn btn-sm btn-outline-primary" onclick="toggleLive()">开启实时流</button>
+    </div>
+    <div class="table-responsive" style="max-height: 280px; overflow-y: auto;">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light sticky-top">
+            <tr><th style="width:150px">时间</th><th style="width:70px">类型</th>
+                <th style="width:130px">来源 IP</th><th>请求 / 用户</th>
+                <th style="width:70px">状态码</th><th style="width:80px">端口</th></tr>
+            </thead>
+            <tbody id="liveBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 筛选栏 -->
+<form class="card stat-card p-3 mb-3" method="get" action="{{ url_for('logs.list_events') }}">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">日志类型</label>
+            <select name="log_type" class="form-select form-select-sm">
+                <option value="">全部</option>
+                {% for t, label in [('ssh','SSH'), ('web','Web'), ('scan','扫描')] %}
+                <option value="{{ t }}" {% if filters.log_type == t %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">来源 IP</label>
+            <input type="text" name="src_ip" class="form-control form-control-sm" value="{{ filters.src_ip }}" placeholder="如 203.0.113">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted mb-1">关键字（URL/原始日志/UA/用户名）</label>
+            <input type="text" name="keyword" class="form-control form-control-sm" value="{{ filters.keyword }}" placeholder="如 union / admin">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">起始日期</label>
+            <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filters.date_from }}">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">结束日期</label>
+            <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filters.date_to }}">
+        </div>
+        <div class="col-md-1 d-grid">
+            <button class="btn btn-primary btn-sm">查询</button>
+        </div>
+    </div>
+    {% if filters.log_type or filters.src_ip or filters.keyword or filters.date_from or filters.date_to %}
+    <div class="mt-2"><a class="small" href="{{ url_for('logs.list_events') }}">清除筛选条件</a></div>
+    {% endif %}
+</form>
+
+<!-- 事件列表 -->
+<div class="card stat-card">
+    <div class="card-header bg-white py-2">
+        <span class="text-muted small">共 {{ pagination.total }} 条，第 {{ pagination.page }} / {{ pagination.pages or 1 }} 页</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th style="width:150px">时间</th><th style="width:70px">类型</th>
+                <th style="width:130px">来源 IP</th><th style="width:60px">方法</th>
+                <th>URL</th><th style="width:70px">状态码</th>
+                <th style="width:100px">用户名</th><th style="width:70px">端口</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for e in events %}
+            <tr>
+                <td class="mono">{{ e.ts }}</td>
+                <td><span class="badge badge-{{ e.log_type }}">{{ e.log_type }}</span></td>
+                <td class="mono">{{ e.src_ip }}</td>
+                <td>{{ e.method or '' }}</td>
+                <td class="mono text-truncate" style="max-width:420px" title="{{ e.url or e.raw }}">{{ e.url or '' }}</td>
+                <td>
+                    {% if e.status_code %}
+                    <span class="{% if e.status_code >= 500 %}sev-high{% elif e.status_code >= 400 %}sev-mid{% endif %}">{{ e.status_code }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ e.username or '' }}</td>
+                <td>{{ e.dst_port or e.src_port or '' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="text-center text-muted py-4">
+                暂无日志数据 —— 到 <a href="{{ url_for('logs.sources') }}">日志源管理</a> 启动一个模拟器试试
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 分页 -->
+    {% if pagination.pages and pagination.pages > 1 %}
+    <div class="card-footer bg-white py-2">
+        <nav>
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('logs.list_events', page=pagination.prev_num, **filters) }}">上一页</a>
+                </li>
+                <li class="page-item disabled"><span class="page-link">{{ pagination.page }} / {{ pagination.pages }}</span></li>
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('logs.list_events', page=pagination.next_num, **filters) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let liveTimer = null;
+let lastSeq = 0;
+let liveTotal = 0;
+
+function toggleLive() {
+    const btn = document.getElementById('liveToggle');
+    const dot = document.getElementById('liveDot');
+    if (liveTimer) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+        btn.textContent = '开启实时流';
+        btn.className = 'btn btn-sm btn-outline-primary';
+        dot.textContent = '已停止';
+        dot.className = 'badge bg-secondary';
+    } else {
+        pollLive();
+        liveTimer = setInterval(pollLive, 2000);
+        btn.textContent = '停止实时流';
+        btn.className = 'btn btn-sm btn-danger';
+        dot.textContent = '运行中';
+        dot.className = 'badge bg-success';
+    }
+}
+
+async function pollLive() {
+    try {
+        const resp = await fetch("{{ url_for('logs.api_live') }}?after=" + lastSeq);
+        const data = await resp.json();
+        lastSeq = data.latest;
+        const tbody = document.getElementById('liveBody');
+        // 倒序插入，最新的在最上面
+        for (const item of data.items.reverse()) {
+            tbody.insertAdjacentHTML('afterbegin', rowHtml(item.event));
+            liveTotal += 1;
+        }
+        while (tbody.children.length > 60) tbody.removeChild(tbody.lastChild);
+        if (liveTotal) {
+            document.getElementById('liveCount').textContent = '本次已接收 ' + liveTotal + ' 条';
+        }
+    } catch (err) { /* 网络异常时静默，下轮重试 */ }
+}
+
+function rowHtml(ev) {
+    const cls = {ssh: 'badge-ssh', web: 'badge-web', scan: 'badge-scan'}[ev.log_type] || 'bg-secondary';
+    const target = ev.url || (ev.username ? 'user: ' + esc(ev.username) : '');
+    return '<tr>' +
+        '<td class="mono">' + esc(ev.ts) + '</td>' +
+        '<td><span class="badge ' + cls + '">' + esc(ev.log_type) + '</span></td>' +
+        '<td class="mono">' + esc(ev.src_ip || '') + '</td>' +
+        '<td>' + esc(ev.method || '') + ' <span class="mono">' + target + '</span></td>' +
+        '<td>' + (ev.status_code || '') + '</td>' +
+        '<td>' + (ev.dst_port || ev.src_port || '') + '</td>' +
+        '</tr>';
+}
+
+// 日志内容含攻击 payload（<script> 等），必须转义后再插入 DOM
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+</script>
+{% endblock %}

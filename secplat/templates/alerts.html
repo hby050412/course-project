@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}告警管理 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">告警管理</h5>
+    <div class="text-muted small">
+        共 {{ summary.total }} 条 ·
+        <span class="text-danger">未处理 {{ summary.new }}</span> ·
+        <span class="sev-high">高危 {{ summary.high }}</span>
+    </div>
+</div>
+
+<!-- 筛选栏 -->
+<form class="card stat-card p-3 mb-3" method="get" action="{{ url_for('alerts.index') }}">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">级别</label>
+            <select name="severity" class="form-select form-select-sm">
+                <option value="">全部</option>
+                {% for key, label in severity_labels.items() %}
+                <option value="{{ key }}" {% if filters.severity == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">状态</label>
+            <select name="status" class="form-select form-select-sm">
+                <option value="">全部</option>
+                {% for key, label in status_labels.items() %}
+                <option value="{{ key }}" {% if filters.status == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">来源 IP</label>
+            <input type="text" name="src_ip" class="form-control form-control-sm" value="{{ filters.src_ip }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted mb-1">规则名称关键字</label>
+            <input type="text" name="keyword" class="form-control form-control-sm" value="{{ filters.keyword }}" placeholder="如 暴力破解">
+        </div>
+        <div class="col-md-2 d-grid">
+            <button class="btn btn-primary btn-sm">筛选</button>
+        </div>
+        <div class="col-md-1">
+            <a class="btn btn-outline-secondary btn-sm w-100" href="{{ url_for('alerts.index') }}">重置</a>
+        </div>
+    </div>
+</form>
+
+<!-- 告警列表（批量处置表单） -->
+<form method="post" action="{{ url_for('alerts.batch_status') }}">
+<div class="card stat-card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+        <span class="text-muted small">共 {{ pagination.total }} 条，第 {{ pagination.page }} / {{ pagination.pages or 1 }} 页</span>
+        <div class="d-flex gap-2">
+            <select name="status" class="form-select form-select-sm" style="width:auto">
+                <option value="confirmed">标记已确认</option>
+                <option value="false_positive">标记误报</option>
+                <option value="closed">标记已处置</option>
+            </select>
+            <button class="btn btn-sm btn-outline-primary"
+                    onclick="return confirm('将勾选的告警批量标记为所选状态？')">批量处置</button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th style="width:32px"></th>
+                <th style="width:56px">级别</th>
+                <th>告警标题</th>
+                <th style="width:130px">来源 IP</th>
+                <th style="width:64px">次数</th>
+                <th style="width:80px">状态</th>
+                <th style="width:150px">最近发生</th>
+                <th style="width:80px">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for a in alerts %}
+            <tr>
+                <td><input type="checkbox" class="form-check-input" name="alert_ids" value="{{ a.id }}"></td>
+                <td><span class="sev-{{ a.severity }}">{{ severity_labels.get(a.severity, a.severity) }}</span></td>
+                <td>
+                    {% if a.source_type == 'ml' %}
+                    <span class="badge bg-info text-dark">ML</span>
+                    {% else %}
+                    <span class="badge bg-light text-secondary border">规则</span>
+                    {% endif %}
+                    <a href="{{ url_for('alerts.detail', alert_id=a.id) }}">{{ a.title }}</a>
+                    {% if a.count and a.count > 1 %}
+                    <span class="badge bg-light text-danger border">×{{ a.count }}</span>
+                    {% endif %}
+                </td>
+                <td class="mono">{{ a.src_ip or '-' }}</td>
+                <td>{{ a.count }}</td>
+                <td><span class="badge {{ status_badges.get(a.status, 'bg-secondary') }}">{{ status_labels.get(a.status, a.status) }}</span></td>
+                <td class="mono small">{{ a.last_seen }}</td>
+                <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('alerts.detail', alert_id=a.id) }}">详情</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="text-center text-muted py-4">
+                暂无告警 —— 到 <a href="{{ url_for('logs.sources') }}">日志源管理</a> 启动一个攻击剧本模拟器试试
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if pagination.pages and pagination.pages > 1 %}
+    <div class="card-footer bg-white py-2">
+        <nav>
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('alerts.index', page=pagination.prev_num, **filters) }}">上一页</a>
+                </li>
+                <li class="page-item disabled"><span class="page-link">{{ pagination.page }} / {{ pagination.pages }}</span></li>
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('alerts.index', page=pagination.next_num, **filters) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+</form>
+{% endblock %}

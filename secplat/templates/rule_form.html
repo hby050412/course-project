@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{% if rule %}编辑规则{% else %}新建规则{% endif %} - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">{% if rule %}编辑规则「{{ rule.name }}」{% else %}新建自定义规则{% endif %}</h5>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('rules.index') }}">← 返回规则列表</a>
+</div>
+
+{% if rule and rule.is_builtin %}
+<div class="alert alert-info py-2 small">
+    这是<b>内置规则</b>：可调整级别、阈值/时间窗、描述与启停状态；
+    匹配逻辑（类型/特征）由系统内置，不可修改。需要不同的匹配逻辑时，请新建自定义规则。
+</div>
+{% endif %}
+
+<div class="card stat-card">
+    <div class="card-body">
+        <form method="post">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small text-muted">规则名称 *</label>
+                    <input type="text" name="name" class="form-control form-control-sm" required
+                           value="{{ form.get('name') or (rule.name if rule else '') }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">类别</label>
+                    <input type="text" name="category" class="form-control form-control-sm"
+                           placeholder="web / ssh / portscan / traffic"
+                           value="{{ form.get('category') or (rule.category if rule else 'custom') }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">级别</label>
+                    <select name="severity" class="form-select form-select-sm">
+                        {% for key, label in severities %}
+                        <option value="{{ key }}"
+                        {% if (form.get('severity') or (rule.severity if rule else 'mid')) == key %}selected{% endif %}>
+                            {{ label }}（{{ key }}）</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label small text-muted">规则类型</label>
+                    <select name="rule_type" id="ruleType" class="form-select form-select-sm"
+                            {% if rule and rule.is_builtin %}disabled{% endif %}
+                            onchange="toggleFields()">
+                        {% for key, label in rule_types %}
+                        <option value="{{ key }}"
+                        {% if (form.get('rule_type') or (rule.rule_type if rule else 'regex')) == key %}selected{% endif %}>
+                            {{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if rule and rule.is_builtin %}
+                    <input type="hidden" name="rule_type" value="{{ rule.rule_type }}">
+                    {% endif %}
+                </div>
+                <div class="col-md-4" id="matchFieldBox">
+                    <label class="form-label small text-muted">匹配字段</label>
+                    <select name="match_field" class="form-select form-select-sm"
+                            {% if rule and rule.is_builtin %}disabled{% endif %}>
+                        {% for key, label in match_fields %}
+                        <option value="{{ key }}"
+                        {% if (form.get('match_field') or (rule.match_field if rule else 'any')) == key %}selected{% endif %}>
+                            {{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if rule and rule.is_builtin %}
+                    <input type="hidden" name="match_field" value="{{ rule.match_field or 'any' }}">
+                    {% endif %}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small text-muted">
+                        匹配内容（特征名 / 正则表达式）*
+                        <span class="text-muted" title="特征名如 sqli/xss/traversal；或填写自定义正则">ⓘ</span>
+                    </label>
+                    <input type="text" name="pattern" class="form-control form-control-sm mono"
+                           {% if rule and rule.is_builtin %}disabled{% else %}placeholder="如：/admin 或 union\s+select"{% endif %}
+                           value="{{ form.get('pattern') or (rule.pattern if rule else '') }}">
+                    {% if rule and rule.is_builtin %}
+                    <input type="hidden" name="pattern" value="{{ rule.pattern }}">
+                    <div class="form-text">内置匹配逻辑：{{ rule.pattern }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="col-md-4 agg-field">
+                    <label class="form-label small text-muted">阈值（次数）</label>
+                    <input type="number" name="threshold" class="form-control form-control-sm" min="1"
+                           value="{{ form.get('threshold') or (rule.threshold if rule and rule.threshold else 5) }}">
+                </div>
+                <div class="col-md-4 agg-field">
+                    <label class="form-label small text-muted">时间窗（秒）</label>
+                    <input type="number" name="time_window" class="form-control form-control-sm" min="1"
+                           value="{{ form.get('time_window') or (rule.time_window if rule and rule.time_window else 60) }}">
+                </div>
+                <div class="col-md-4 agg-field">
+                    <label class="form-label small text-muted">分组字段</label>
+                    <input type="text" name="group_field" class="form-control form-control-sm"
+                           value="{{ form.get('group_field') or (rule.group_field if rule and rule.group_field else 'src_ip') }}">
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label small text-muted">规则描述（告警详情与 AI 研判会引用）</label>
+                    <textarea name="description" class="form-control form-control-sm" rows="2">{{ form.get('description') or (rule.description if rule else '') }}</textarea>
+                </div>
+
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
+                               {% if not rule or rule.enabled %}checked{% endif %}>
+                        <label class="form-check-label small" for="enabled">启用该规则（保存后即时生效）</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <button class="btn btn-primary btn-sm">保存</button>
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('rules.index') }}">取消</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleFields() {
+    const type = document.getElementById('ruleType').value;
+    const isAgg = (type === 'aggregate' || type === 'composite');
+    document.querySelectorAll('.agg-field').forEach(el => {
+        el.style.display = isAgg ? '' : 'none';
+    });
+}
+toggleFields();
+</script>
+{% endblock %}

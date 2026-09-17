@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<h5 class="mb-3">仪表盘</h5>
+
+<!-- 统计卡片 -->
+<div class="row g-3">
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card p-3">
+            <div class="stat-value">{{ stats.total_events }}</div>
+            <div class="stat-label">日志事件总数</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card p-3">
+            <div class="stat-value">{{ stats.today_events }}</div>
+            <div class="stat-label">今日事件数</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card p-3">
+            <div class="stat-value text-success">{{ stats.active_sources }}
+                <span class="fs-6 text-muted">/ {{ stats.sources }}</span></div>
+            <div class="stat-label">运行中模拟器 / 日志源</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card p-3">
+            <div class="stat-value">{{ stats.total_alerts }}</div>
+            <div class="stat-label">告警总数</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card p-3">
+            <div class="stat-value text-danger">{{ stats.new_alerts }}</div>
+            <div class="stat-label">未处理告警</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card p-3">
+            <div class="stat-value sev-high">{{ stats.high_alerts }}</div>
+            <div class="stat-label">高危告警</div>
+        </div>
+    </div>
+</div>
+
+<!-- 图表区 -->
+<div class="row g-3 mt-1">
+    <div class="col-lg-7">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2">攻击时间线（最近 24 小时告警数）</div>
+            <div class="card-body py-2"><div id="chartTimeline" style="height: 260px;"></div></div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2">告警级别占比</div>
+            <div class="card-body py-2"><div id="chartSeverity" style="height: 260px;"></div></div>
+        </div>
+    </div>
+    <div class="col-12">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2">TOP 攻击源（按告警数）</div>
+            <div class="card-body py-2"><div id="chartTop" style="height: 280px;"></div></div>
+        </div>
+    </div>
+</div>
+
+{% if not has_alert_data %}
+<div class="alert alert-light border mt-3 small text-muted">
+    💡 暂无告警数据 —— 到 <a href="{{ url_for('logs.sources') }}">日志源管理</a> 创建一个「SSH 暴力破解」模拟器并启动，
+    回本页即可看到攻击时间线与 TOP 攻击源实时更新。
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+<script>
+const timelineOption = {{ timeline_option | tojson }};
+const severityOption = {{ severity_pie_option | tojson }};
+const topOption = {{ top_sources_option | tojson }};
+
+echarts.init(document.getElementById('chartTimeline')).setOption(timelineOption);
+echarts.init(document.getElementById('chartSeverity')).setOption(severityOption);
+echarts.init(document.getElementById('chartTop')).setOption(topOption);
+
+// 窗口尺寸变化时自适应
+window.addEventListener('resize', () => {
+    document.querySelectorAll('[id^=chart]').forEach(el => {
+        const inst = echarts.getInstanceByDom(el);
+        if (inst) inst.resize();
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}机器学习 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">机器学习异常检测
+        <span class="text-muted small ms-2">无监督：无需标注，自动发现行为偏离正常的 IP</span>
+    </h5>
+    <form method="post" action="{{ url_for('ml.clear') }}"
+          onsubmit="return confirm('清空模型与检测结果？（不影响日志与规则告警）')">
+        <button class="btn btn-sm btn-outline-secondary">清空结果</button>
+    </form>
+</div>
+
+<!-- 训练控制 -->
+<div class="card stat-card mb-3">
+    <div class="card-header bg-white py-2">模型训练</div>
+    <div class="card-body py-3">
+        <form method="post" action="{{ url_for('ml.train') }}" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label small text-muted">训练数据范围</label>
+                <select name="hours" class="form-select form-select-sm">
+                    <option value="1">最近 1 小时</option>
+                    <option value="6">最近 6 小时</option>
+                    <option value="24" selected>最近 24 小时</option>
+                    <option value="0">全部数据</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small text-muted">行为时间窗（秒）</label>
+                <input type="number" name="window" class="form-control form-control-sm" value="60" min="10" max="3600">
+                <div class="form-text">每个 IP 每 N 秒聚合为一组行为样本</div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-check mt-4">
+                    <input class="form-check-input" type="checkbox" name="also_kmeans" id="alsoKmeans" checked>
+                    <label class="form-check-label small" for="alsoKmeans">同时运行 K-means 聚类（对比）</label>
+                </div>
+            </div>
+            <div class="col-md-3 d-grid">
+                <button class="btn btn-primary btn-sm">开始训练</button>
+            </div>
+        </form>
+        <div class="text-muted small mt-2">
+            当前日志库共 {{ stats.events_available }} 条事件 ·
+            {% if model %}最近训练：{{ model.trained_at }}（{{ model.data_range }}）{% else %}尚未训练{% endif %}
+        </div>
+    </div>
+</div>
+
+{% if model %}
+<!-- 统计与阈值 -->
+<div class="row g-3 mb-3">
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card p-3">
+            <div class="stat-value">{{ stats.total_samples }}</div>
+            <div class="stat-label">行为样本总数（IP × 时间窗）</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card p-3">
+            <div class="stat-value text-danger">{{ stats.anomaly_count }}</div>
+            <div class="stat-label">检出异常（阈值 {{ stats.threshold }}）</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card p-3">
+            <div class="stat-value">{{ (stats.anomaly_count / stats.total_samples * 100) | round(1) if stats.total_samples else 0 }}%</div>
+            <div class="stat-label">异常占比</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card p-3">
+            <div class="stat-value text-primary">{{ model.metrics.samples if model.metrics else '-' }}</div>
+            <div class="stat-label">上次训练样本数</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <!-- 阈值滑块 -->
+    <div class="col-lg-5">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white py-2">异常判定阈值（灵敏度调节）</div>
+            <div class="card-body py-3">
+                <form method="get" action="{{ url_for('ml.index') }}">
+                    <label class="form-label small text-muted">
+                        阈值：<span id="thLabel" class="fw-bold">{{ stats.threshold }}</span>
+                        （调低 → 检出更多、可能误报增加；调高 → 更严格）
+                    </label>
+                    <input type="range" name="threshold" class="form-range" min="0.05" max="0.99" step="0.01"
+                           value="{{ stats.threshold }}"
+                           oninput="document.getElementById('thLabel').textContent = this.value"
+                           onchange="this.form.submit()">
+                </form>
+                <div id="chartDist" style="height: 180px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- K-means 结果 -->
+    <div class="col-lg-7">
+        <div class="card stat-card h-100">
+            <div class="card-header bg-white py-2">K-means 行为聚类（辅助对比）</div>
+            <div class="card-body py-3">
+                {% if kmeans_meta %}
+                <p class="mb-1">簇数量 <strong>k={{ kmeans_meta.k }}</strong> ·
+                   轮廓系数 <strong>{{ kmeans_meta.silhouette }}</strong>
+                   <span class="text-muted small">（越接近 1 聚类越清晰）</span></p>
+                <p class="text-muted small mb-0">
+                    与孤立森林的定位差异：孤立森林找「个体离群」（行为异常者），
+                    K-means 找「群体模式」（行为相似者成簇）——多个攻击者行为相似时会自成一簇，
+                    通过簇特征（如高失败率簇）识别攻击群体。
+                </p>
+                {% else %}
+                <p class="text-muted small mb-0">尚未运行 K-means（训练时勾选「同时运行」）</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 异常列表（含特征贡献解释） -->
+<div class="card stat-card">
+    <div class="card-header bg-white py-2">
+        异常 IP 行为画像
+        <span class="text-muted small ms-1">（按异常分降序，Top {{ anomalies|length }}；"为什么异常"为偏离正常基线的特征）</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-compact table-hover mb-0">
+            <thead class="table-light">
+            <tr>
+                <th style="width:140px">来源 IP</th>
+                <th style="width:100px">异常分</th>
+                <th style="width:150px">时间窗</th>
+                <th>主要偏离特征（为什么判它异常）</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for a in anomalies %}
+            <tr>
+                <td class="mono">{{ a.src_ip }}</td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <div class="progress flex-grow-1 me-2" style="height:6px;width:50px">
+                            <div class="progress-bar bg-danger" style="width: {{ (a.score * 100) | round(0) }}%"></div>
+                        </div>
+                        <span class="sev-high">{{ a.score }}</span>
+                    </div>
+                </td>
+                <td class="mono small">{{ a.ts }}</td>
+                <td class="small">
+                    {% for c in a.contribution %}
+                    <span class="badge bg-light text-dark border me-1"
+                          title="当前值 {{ c.value }} vs 正常中位数 {{ c.baseline }}">
+                        {{ c.feature }} {{ '↑' if c.deviation > 0 else '↓' }}
+                        {{ c.abs_deviation }}σ
+                    </span>
+                    {% else %}
+                    <span class="text-muted">（无贡献数据）</span>
+                    {% endfor %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-center text-muted py-4">
+                当前阈值下无异常样本 —— 调低阈值，或到日志源管理生成更多流量后重新训练
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-light border small text-muted">
+    💡 尚无模型。点击上方「开始训练」即可基于已有日志训练异常检测模型
+    （需至少 10 组 IP×时间窗样本——启动一个模拟器跑 1 分钟即可满足）。
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if model %}
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+<script>
+const distData = {{ dist | tojson }};
+echarts.init(document.getElementById('chartDist')).setOption({
+    grid: {left: 40, right: 15, top: 15, bottom: 25},
+    tooltip: {trigger: 'axis'},
+    xAxis: {type: 'category', data: distData.map(d => d.range), axisLabel: {fontSize: 9}},
+    yAxis: {type: 'value', minInterval: 1},
+    series: [{type: 'bar', data: distData.map(d => d.count),
+              itemStyle: {color: '#dc3545'}, barWidth: '60%'}]
+});
+</script>
+{% endif %}
+{% endblock %}

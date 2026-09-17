@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>安全检测报告 - {{ target.name or target.url }}</title>
+<!--
+  自包含报告模板：样式全部内联，不引用任何外部资源（离线可打开）。
+  打印样式：浏览器 Ctrl+P 可直接另存为 PDF（A4、隐藏按钮、避免跨页断行）。
+-->
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+         color: #212529; margin: 0; padding: 32px 40px; line-height: 1.65;
+         background: #fff; font-size: 14px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 10px; padding-bottom: 6px;
+       border-bottom: 2px solid #212529; }
+  h3 { font-size: 15px; margin: 18px 0 6px; }
+  .sub { color: #6c757d; font-size: 12px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 13px; }
+  th, td { border: 1px solid #dee2e6; padding: 6px 8px; text-align: left;
+           vertical-align: top; }
+  th { background: #f1f3f5; font-weight: 600; white-space: nowrap; }
+  .meta td:first-child { width: 130px; color: #495057; background: #f8f9fa; }
+  .sev { font-weight: 700; }
+  .risk-box { border: 2px solid; padding: 12px 16px; margin: 12px 0 4px; }
+  .risk-box .risk-title { font-size: 18px; font-weight: 700; }
+  .cards { margin-top: 8px; }
+  .card { border: 1px solid #dee2e6; border-left: 5px solid #adb5bd;
+          padding: 10px 14px; margin-bottom: 14px; page-break-inside: avoid; }
+  .card .hd { display: flex; justify-content: space-between; flex-wrap: wrap; }
+  .card .pos { font-family: Consolas, Monaco, monospace; font-size: 12px;
+               word-break: break-all; color: #495057; }
+  .kv { font-size: 13px; margin: 4px 0; }
+  .kv b { color: #495057; }
+  code, pre { font-family: Consolas, Monaco, monospace; font-size: 12px; }
+  code { background: #f1f3f5; padding: 1px 4px; border-radius: 3px;
+         word-break: break-all; }
+  pre { background: #f8f9fa; border: 1px solid #e9ecef; padding: 8px 10px;
+        white-space: pre-wrap; word-break: break-all; margin: 4px 0; }
+  .fix { background: #f0f7ff; border-left: 3px solid #0d6efd;
+         padding: 6px 10px; margin-top: 6px; font-size: 13px; }
+  ul { margin: 4px 0 4px 18px; padding: 0; }
+  .muted { color: #6c757d; }
+  .foot { margin-top: 28px; padding-top: 10px; border-top: 1px solid #dee2e6;
+          font-size: 11px; color: #6c757d; }
+  .toolbar { margin-bottom: 16px; }
+  .toolbar button { padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  @media print {
+    body { padding: 0; font-size: 12px; }
+    .toolbar { display: none; }              /* 打印/PDF 时隐藏操作按钮 */
+    h2 { page-break-after: avoid; }
+    .card { page-break-inside: avoid; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button onclick="window.print()">🖨️ 打印 / 另存为 PDF</button>
+  <a href="/reports" style="margin-left:12px; font-size:13px;">← 返回报告列表</a>
+</div>
+
+<h1>安全检测报告</h1>
+<div class="sub">
+  本报告由「{{ tool.name }}」{{ tool.version }} 自动生成 ·
+  生成时间：{{ generated_at }}
+</div>
+
+<h2>一、检测概要</h2>
+<table class="meta">
+  <tr><td>检测目标</td><td><b>{{ target.name or '（未命名）' }}</b>　<code>{{ target.url }}</code></td></tr>
+  <tr><td>任务编号</td><td>#{{ task.id }}</td></tr>
+  <tr><td>检测时间</td><td>{{ task.started_at or '—' }} ~ {{ task.finished_at or '—' }}</td></tr>
+  <tr><td>启用检测器</td><td>{{ (task.detector_ids or []) | join('、') }}</td></tr>
+  <tr><td>请求数 / 耗时</td><td>{{ task.request_count or 0 }} 次 / {{ task.elapsed or 0 }} 秒</td></tr>
+</table>
+
+<h2>二、执行摘要</h2>
+<div class="risk-box" style="border-color: {{ risk_color }};">
+  <div class="risk-title" style="color: {{ risk_color }};">整体风险：{{ risk_label }}</div>
+  <div class="kv">
+    发现安全问题 <b>{{ findings | length }}</b> 个：
+    {% for sev in ['critical', 'high', 'mid', 'low', 'info'] %}
+      {% if by_severity.get(sev) %}
+        <span class="sev" style="color: {{ sev | severity_color }};">
+          {{ sev | severity_label }} {{ by_severity[sev] }}</span>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% if by_type %}
+  <div class="kv muted">类型分布：
+    {% for t, n in by_type.items() %}{{ t }}（{{ n }}）{% if not loop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{% if findings %}
+<h2>三、漏洞清单</h2>
+<table>
+  <thead><tr><th style="width:60px">序号</th><th style="width:70px">级别</th>
+    <th style="width:150px">类型</th><th>位置</th></tr></thead>
+  <tbody>
+  {% for f in findings %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td class="sev" style="color: {{ f.severity | severity_color }};">{{ f.severity | severity_label }}</td>
+    <td>{{ f.vuln_type }}</td>
+    <td class="pos">{{ f.url }}{% if f.param %}　参数：<code>{{ f.param }}</code>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>四、漏洞详情与修复建议</h2>
+<div class="cards">
+{% for f in findings %}
+  <div class="card" style="border-left-color: {{ f.severity | severity_color }};">
+    <div class="hd">
+      <h3>{{ loop.index }}. <span class="sev" style="color: {{ f.severity | severity_color }};">[{{ f.severity | severity_label }}]</span>
+        {{ f.vuln_type | upper }}</h3>
+    </div>
+    <div class="kv"><b>位置：</b><span class="pos">{{ f.url }}</span></div>
+    <div class="kv"><b>参数：</b><code>{{ f.param or '—' }}</code>
+      {% if f.payload %}　<b>载荷：</b><code>{{ f.payload }}</code>{% endif %}</div>
+    <div class="kv"><b>问题说明：</b>{{ f.description }}</div>
+    {% if f.evidence %}
+    <div class="kv"><b>响应证据：</b></div>
+    <pre>{{ f.evidence }}</pre>
+    {% endif %}
+    {% if f.fix_suggestion %}
+    <div class="fix"><b>修复建议：</b>{{ f.fix_suggestion }}</div>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+{% else %}
+<h2>三、漏洞清单</h2>
+<p class="muted">本次检测未发现已知安全问题。这不代表系统绝对安全——请结合定期复测与人工评估。</p>
+{% endif %}
+
+<h2>{{ '五' if findings else '四' }}、信息收集结果</h2>
+{% set cms = info.get('cms') %}
+{% if cms and cms.get('fingerprints') %}
+<h3>技术栈指纹</h3>
+<table>
+  <thead><tr><th>组件</th><th>类别</th><th>版本</th><th>识别依据</th></tr></thead>
+  <tbody>
+  {% for fp in cms.fingerprints %}
+  <tr><td>{{ fp.name }}</td><td>{{ fp.category }}</td><td>{{ fp.version or '—' }}</td>
+      <td class="muted">{{ fp.evidence }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% set hd = info.get('headers') %}
+{% if hd %}
+<h3>响应头分析</h3>
+<div class="kv"><b>Server：</b><code>{{ hd.server or '（未返回）' }}</code></div>
+{% if hd.missing_security %}
+<div class="kv"><b>缺失的安全响应头：</b>
+  {% for m in hd.missing_security %}<code>{{ m.header }}</code>（{{ m.purpose }}）{% if not loop.last %}、{% endif %}{% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+{% set robots = info.get('robots') %}
+{% if robots and robots.get('disallow') %}
+<h3>robots.txt 线索（往往指向后台/备份/配置文件）</h3>
+<ul>{% for d in robots.disallow %}<li><code>{{ d }}</code></li>{% endfor %}</ul>
+{% endif %}
+
+{% set dirs = info.get('dirs') %}
+{% if dirs and dirs['items'] %}
+<h3>目录探测结果（{{ dirs.summary.accessible }} 个可访问 / 共 {{ dirs.summary.total }} 个）</h3>
+<table>
+  <thead><tr><th>路径</th><th style="width:70px">状态码</th><th style="width:80px">大小</th></tr></thead>
+  <tbody>
+  {% for item in dirs['items'] %}
+  <tr><td><code>{{ item.path }}</code></td><td>{{ item.status }}</td><td class="muted">{{ item.size }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>{{ '六' if findings else '五' }}、声明</h2>
+<p class="muted">{{ disclaimer }}</p>
+
+<div class="foot">
+  {{ tool.name }} {{ tool.version }} · 报告生成时间 {{ generated_at }} ·
+  本报告含检测到的攻击载荷原文，请勿在不受控环境随意打开或转发
+</div>
+
+</body>
+</html>

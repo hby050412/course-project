@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}网络安全检测平台{% endblock %}</title>
+    <!-- 静态资源本地引入（演示断网可用） -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+
+{% if session.get('user_id') %}
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="{{ url_for('dashboard.index') }}">🛡️ 安全检测平台</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navMain">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item"><a class="nav-link {% if request.path == '/dashboard' %}active{% endif %}"
+                        href="{{ url_for('dashboard.show') }}">仪表盘</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path == '/logs' %}active{% endif %}"
+                        href="{{ url_for('logs.list_events') }}">日志</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path == '/logs/sources' %}active{% endif %}"
+                        href="{{ url_for('logs.sources') }}">日志源</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path.startswith('/alerts') %}active{% endif %}"
+                        href="{{ url_for('alerts.index') }}">告警</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path.startswith('/rules') %}active{% endif %}"
+                        href="{{ url_for('rules.index') }}">规则</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path.startswith('/ml') %}active{% endif %}"
+                        href="{{ url_for('ml.index') }}">机器学习</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path.startswith('/scanner') %}active{% endif %}"
+                        href="{{ url_for('scanner.index') }}">主动扫描</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path.startswith('/reports') %}active{% endif %}"
+                        href="{{ url_for('report.index') }}">报告</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.path == '/settings' %}active{% endif %}"
+                        href="{{ url_for('settings.index') }}">设置</a></li>
+            </ul>
+            <span class="navbar-text me-3">{{ session.get('username') }}</span>
+            <a class="btn btn-outline-light btn-sm" href="{{ url_for('auth.logout') }}">退出</a>
+        </div>
+    </div>
+</nav>
+{% endif %}
+
+<div class="container-fluid py-3 px-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show py-2" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</div>
+
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

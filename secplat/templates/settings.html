@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}系统设置 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<h5 class="mb-3">系统设置</h5>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <form method="post">
+            <!-- AI 配置 -->
+            <div class="card stat-card mb-3">
+                <div class="card-header bg-white py-2">🤖 AI 智能研判（DeepSeek）</div>
+                <div class="card-body py-3">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">
+                            API Key
+                            {% if key_configured %}
+                            <span class="badge bg-success ms-1">已配置</span>
+                            <span class="mono text-muted ms-1">{{ key_masked }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary ms-1">未配置</span>
+                            {% endif %}
+                        </label>
+                        <input type="password" name="deepseek_api_key" class="form-control form-control-sm"
+                               placeholder="{% if key_configured %}留空表示不修改；输入新值可覆盖{% else %}粘贴 DeepSeek API key（sk- 开头）{% endif %}"
+                               autocomplete="new-password">
+                        <div class="form-text">
+                            获取方式：<a href="https://platform.deepseek.com" target="_blank">platform.deepseek.com</a> 注册后创建 API key
+                            （费用约 1~2 元/百万 token，演示用量约 10 元可用到毕业）。
+                            Key 仅存储在服务端数据库，页面永不回显明文。
+                        </div>
+                    </div>
+                    {% if key_configured %}
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="clear_key" id="clearKey">
+                        <label class="form-check-label small text-danger" for="clearKey">
+                            清除已配置的 API key（清除后 AI 功能降级提示、核心检测不受影响）</label>
+                    </div>
+                    <div class="text-muted small">已生成 AI 研判记录：{{ insight_count }} 条（可回放）</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- 数据与展示 -->
+            <div class="card stat-card mb-3">
+                <div class="card-header bg-white py-2">📦 数据与界面</div>
+                <div class="card-body py-3">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">日志保留天数</label>
+                            <input type="number" name="log_retention_days" class="form-control form-control-sm"
+                                   min="1" max="3650" value="{{ log_retention_days }}">
+                            <div class="form-text">超过保留期的日志将在应用启动时自动清理（防止数据库无限膨胀）</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">实时流轮询间隔（秒）</label>
+                            <input type="number" name="live_poll_interval" class="form-control form-control-sm"
+                                   min="1" max="60" value="{{ live_poll_interval }}">
+                            <div class="form-text">日志页"实时流"的刷新频率；网络较慢时可调大</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary btn-sm">保存设置</button>
+        </form>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2">ℹ️ 关于 AI 功能</div>
+            <div class="card-body py-3 small text-muted">
+                <p>AI 智能研判是系统的<b>增强能力</b>：</p>
+                <ul class="ps-3 mb-2">
+                    <li>对告警自动生成「危害评估 / 根因分析 / 处置建议」</li>
+                    <li>结果归档，断网时仍可回放（答辩演示保障）</li>
+                    <li><b>未配置 key 或断网时，系统核心检测功能完全不受影响</b></li>
+                </ul>
+                <p class="mb-0">成本参考：一次告警研判约消耗 1000 tokens ≈ 0.002 元。</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
