@@ -156,3 +156,15 @@ def build_daily_user_prompt(stats: dict, top_rules: list, samples: list) -> str:
     lines.append("")
     lines.append("请撰写今日安全简报。")
     return "\n".join(lines)
+
+
+# ================================================================ Prompt 版本（质量评估实验用）
+# AI-2 质量评估要求"Prompt 迭代对比"：同一批用例、同一模型，仅替换 system prompt，
+# 比较一致率/可用率。v1 是刻意保留的**朴素基线**（只给角色，不约束输出结构、
+# 不要求"只依据给定数据"），用于度量 Prompt 工程的真实收益。
+REVIEW_SYSTEM_PROMPT_V1 = """你是一名网络安全分析师，请分析给定的安全告警。"""
+
+REVIEW_PROMPTS = {
+    "v1_朴素基线": REVIEW_SYSTEM_PROMPT_V1,
+    "v2_结构约束": REVIEW_SYSTEM_PROMPT,
+}

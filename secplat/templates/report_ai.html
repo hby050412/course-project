@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}AI 报告解读 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">🤖 AI 报告解读 <span class="text-muted fs-6">报告 #{{ report.id }}</span></h5>
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('report.view', report_id=report.id) }}"
+           target="_blank">查看结构化报告</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('report.index') }}">← 报告列表</a>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span>面向管理者的解读（由大模型基于扫描结果生成）</span>
+                {% if insight and insight.status == 'ok' %}
+                <span class="small text-muted">
+                    {{ insight.model }} · {{ insight.prompt_tokens + insight.completion_tokens }} tokens ·
+                    {{ insight.created_at }}
+                </span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if body_html %}
+                    <div class="ai-report">{{ body_html | safe }}</div>
+                {% elif insight and insight.status == 'failed' %}
+                    <div class="alert alert-danger py-2 mb-0">
+                        <b>上次生成失败：</b>{{ insight.output }}
+                        <div class="small mt-1">结构化报告与检测功能完全不受影响（AI 是增强，不是依赖）。</div>
+                    </div>
+                {% else %}
+                    <div class="text-muted">
+                        尚未生成 AI 解读。点击右侧「AI 生成解读」按钮，平台会把本次扫描的漏洞统计与
+                        明细交给大模型，产出面向管理者的执行摘要、重点风险解读与整改优先级建议。
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card stat-card mt-3">
+            <div class="card-header bg-white py-2">本次扫描概况（AI 的输入依据）</div>
+            <div class="card-body py-2 small">
+                {% set s = report.summary or {} %}
+                <div>整体风险：<span class="sev-{{ s.risk or 'info' }}">
+                    {{ severity_labels.get(s.risk, s.risk or '—') }}</span>
+                    · 漏洞总数：<b>{{ s.total or 0 }}</b></div>
+                <div class="text-muted mt-1">{{ s.line or '' }}</div>
+                <div class="text-muted mt-2">
+                    说明：AI 只基于上述扫描结果生成文本，不执行任何操作、不修改数据；
+                    其结论仅作参考，技术细节以结构化报告为准。
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2">生成 / 重新生成</div>
+            <div class="card-body">
+                {% if ai_configured %}
+                <form method="post" action="{{ url_for('report.ai_generate', report_id=report.id) }}">
+                    <button class="btn btn-primary btn-sm w-100">
+                        {% if insight %}重新生成解读{% else %}AI 生成解读{% endif %}
+                    </button>
+                </form>
+                <div class="small text-muted mt-2">
+                    费用：DeepSeek 约 1~2 元/百万 token，单次解读约数分钱；
+                    每次调用的 token 消耗会记录在下方历史中。
+                </div>
+                {% else %}
+                <div class="alert alert-warning py-2 mb-0 small">
+                    AI 服务未配置：请到 <a href="{{ url_for('settings.index') }}">设置</a> 页填入
+                    DeepSeek API key。未配置时平台其余功能完全不受影响。
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card stat-card mt-3">
+            <div class="card-header bg-white py-2">历史记录（断网也可回看）</div>
+            <div class="card-body py-2">
+                {% if history %}
+                <table class="table table-sm mb-0">
+                    <tbody>
+                    {% for h in history %}
+                    <tr>
+                        <td class="small">{{ h.created_at }}</td>
+                        <td class="small">
+                            {% if h.status == 'ok' %}
+                            <span class="badge bg-success">成功</span>
+                            {% else %}
+                            <span class="badge bg-danger">失败</span>
+                            {% endif %}
+                        </td>
+                        <td class="small text-muted">{{ h.prompt_tokens + h.completion_tokens }} tokens</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="small text-muted">暂无生成记录</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

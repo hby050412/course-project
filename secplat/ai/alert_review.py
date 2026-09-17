@@ -11,7 +11,7 @@ REVIEW_FIELDS = ("severity_assessment", "analysis", "recommendation")
 
 
 def review_alert(client: DeepSeekClient, alert: dict, samples: list,
-                 stats: dict = None) -> dict:
+                 stats: dict = None, system_prompt: str = None) -> dict:
     """对单条告警执行 AI 研判。
 
     Args:
@@ -19,6 +19,7 @@ def review_alert(client: DeepSeekClient, alert: dict, samples: list,
         alert: 告警信息 dict（见 prompts.build_review_user_prompt）
         samples: 关联日志样本（字符串列表）
         stats: 行为统计（可选）
+        system_prompt: 覆盖默认 system prompt（Prompt 版本对比实验用）
 
     Returns:
         {
@@ -32,7 +33,7 @@ def review_alert(client: DeepSeekClient, alert: dict, samples: list,
     user_prompt = build_review_user_prompt(alert, samples or [], stats or {})
 
     try:
-        result = client.chat(REVIEW_SYSTEM_PROMPT, user_prompt)
+        result = client.chat(system_prompt or REVIEW_SYSTEM_PROMPT, user_prompt)
     except AIError as exc:
         return {"status": "failed", "output": None, "error": str(exc),
                 "model": client.model, "prompt_tokens": 0, "completion_tokens": 0}

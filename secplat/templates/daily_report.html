@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}AI 安全日报 - 网络安全检测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">📋 AI 安全日报 <span class="text-muted fs-6">最近 24 小时</span></h5>
+    <div class="d-flex gap-2">
+        <form method="post" action="{{ url_for('report.daily_generate') }}">
+            <button class="btn btn-sm btn-primary" {% if not ai_configured %}disabled{% endif %}>
+                {% if insight %}重新生成日报{% else %}生成 AI 日报{% endif %}
+            </button>
+        </form>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('report.index') }}">← 报告列表</a>
+    </div>
+</div>
+
+{% if not ai_configured %}
+<div class="alert alert-warning py-2">
+    AI 服务未配置（未填 API key）—— 下方统计数据仍然可用；
+    到 <a href="{{ url_for('settings.index') }}">设置</a> 页配置后即可生成日报。
+</div>
+{% endif %}
+
+<!-- 统计卡片（AI 的输入依据） -->
+<div class="row g-3 mb-3">
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value">{{ context.stats.get('告警总数', 0) }}</div>
+            <div class="stat-label">24h 告警</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value sev-high">{{ context.stats.get('高危(high)', 0) }}</div>
+            <div class="stat-label">高危</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value text-danger">{{ context.stats.get('未处理(new)', 0) }}</div>
+            <div class="stat-label">未处理</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value">{{ context.stats.get('涉及来源 IP 数', 0) }}</div>
+            <div class="stat-label">涉及来源 IP</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span>日报正文（由大模型基于告警统计生成）</span>
+                {% if insight and insight.status == 'ok' %}
+                <span class="small text-muted">
+                    {{ insight.model }} · {{ insight.prompt_tokens + insight.completion_tokens }} tokens ·
+                    {{ insight.created_at }}
+                </span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if body_html %}
+                    <div class="ai-report">{{ body_html | safe }}</div>
+                {% elif insight and insight.status == 'failed' %}
+                    <div class="alert alert-danger py-2 mb-0">
+                        <b>上次生成失败：</b>{{ insight.output }}
+                        <div class="small mt-1">告警与检测功能不受影响。</div>
+                    </div>
+                {% else %}
+                    <div class="text-muted">
+                        尚未生成日报。点击右上角「生成 AI 日报」，平台会把近 24 小时的告警统计、
+                        规则命中分布与代表性事件交给大模型，归纳出今日概况、重点事件、趋势观察与建议。
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card stat-card mt-3">
+            <div class="card-header bg-white py-2">代表性事件（最多 8 条）</div>
+            <div class="card-body py-2">
+                {% if context.samples %}
+                {% for s in context.samples %}
+                <div class="mono small border-bottom py-1">{{ s }}</div>
+                {% endfor %}
+                {% else %}
+                <div class="small text-muted py-1">近 24 小时无告警</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2">规则命中分布（24h）</div>
+            <div class="card-body py-2">
+                {% if context.top_rules %}
+                <table class="table table-sm mb-0">
+                    <tbody>
+                    {% for name, n in context.top_rules %}
+                    <tr><td class="small">{{ name }}</td>
+                        <td class="small text-end text-muted">{{ n }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="small text-muted">无</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card stat-card mt-3">
+            <div class="card-header bg-white py-2">历史记录</div>
+            <div class="card-body py-2">
+                {% if history %}
+                <table class="table table-sm mb-0">
+                    <tbody>
+                    {% for h in history %}
+                    <tr>
+                        <td class="small">{{ h.created_at }}</td>
+                        <td class="small">
+                            {% if h.status == 'ok' %}
+                            <span class="badge bg-success">成功</span>
+                            {% else %}
+                            <span class="badge bg-danger">失败</span>
+                            {% endif %}
+                        </td>
+                        <td class="small text-muted">{{ h.prompt_tokens + h.completion_tokens }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="small text-muted">暂无记录</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -25,6 +25,7 @@ def create_app(config_class=Config) -> Flask:
         _cleanup_expired_logs()   # 日志膨胀控制：按保留天数清理过期事件
 
     _register_blueprints(app)
+    _register_globals(app)
 
     # 健康检查（临时，M1-5 由 dashboard 蓝图接管根路径）
     @app.route("/healthz")
@@ -75,6 +76,20 @@ def _cleanup_expired_logs():
     deleted = LogEvent.query.filter(LogEvent.ts < cutoff).delete(synchronize_session=False)
     if deleted:
         db.session.commit()
+
+
+def _register_globals(app):
+    """模板全局变量（所有模板可直接使用，无需各路由重复传参）
+
+    `severity_labels` 曾被两个页面漏传而导致 500——改为全局注入，
+    从根上消除这一类"忘了传"的错误（新增页面也自动可用）。
+    """
+    from .utils.chart_utils import SEVERITY_COLORS, SEVERITY_LABELS
+
+    @app.context_processor
+    def _inject():
+        return {"severity_labels": SEVERITY_LABELS,
+                "severity_colors": SEVERITY_COLORS}
 
 
 def _register_blueprints(app):

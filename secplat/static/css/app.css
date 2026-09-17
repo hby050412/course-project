@@ -50,3 +50,10 @@ body {
     font-weight: 600;
     letter-spacing: .5px;
 }
+
+/* AI 生成内容（Markdown 渲染结果） */
+.ai-report h3 { font-size: 16px; margin: 14px 0 6px; font-weight: 600; }
+.ai-report h4 { font-size: 14px; margin: 12px 0 4px; font-weight: 600; }
+.ai-report p { margin: 4px 0; }
+.ai-report ul, .ai-report ol { margin: 4px 0 8px 20px; padding: 0; }
+.ai-report li { margin: 2px 0; }

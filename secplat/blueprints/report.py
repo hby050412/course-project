@@ -16,7 +16,13 @@ from pathlib import Path
 from flask import (Blueprint, Response, current_app, flash, redirect,
                    render_template, request, send_file, url_for)
 
-from ..models import Report, ScanFinding, ScanInfoResult, ScanTarget, ScanTask, db, now_iso
+from ..ai.client import client_from_settings
+from ..ai.daily_report import extract_daily_context, write_daily_report
+from ..ai.report_writer import extract_report_context, write_security_report
+from ..models import (AIInsight, Report, ScanFinding, ScanInfoResult,
+                      ScanTarget, ScanTask, db, now_iso)
+from ..utils import markdown_min
+from .settings import get_api_key
 from ..scanner import report as report_gen
 from ..utils.chart_utils import SEVERITY_LABELS
 from .auth import login_required
@@ -201,3 +207,118 @@ def delete(report_id: int):
     db.session.commit()
     flash("报告已删除", "success")
     return redirect(url_for("report.index"))
+
+
+# ================================================================ AI 解读（AI-2）
+
+def _save_insight(target_type: str, target_id: int, ai_type: str, result: dict):
+    """AI 结果落库（成功与失败都记，便于回放与质量评估）"""
+    row = AIInsight(
+        target_type=target_type, target_id=target_id, ai_type=ai_type,
+        model=result.get("model"), status=result["status"],
+        output=(result.get("output") if result.get("output")
+                else (result.get("error") or "")),
+        prompt_tokens=result.get("prompt_tokens", 0),
+        completion_tokens=result.get("completion_tokens", 0),
+    )
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+def _latest_insight(target_type: str, target_id: int):
+    return (AIInsight.query
+            .filter_by(target_type=target_type, target_id=target_id)
+            .order_by(AIInsight.id.desc()).first())
+
+
+@report_bp.route("/reports/<int:report_id>/ai")
+@login_required
+def ai_view(report_id: int):
+    """AI 解读页：结构化报告的技术细节 + AI 的管理者视角解读"""
+    row = db.session.get(Report, report_id)
+    if row is None:
+        flash("报告不存在", "warning")
+        return redirect(url_for("report.index"))
+
+    insight = _latest_insight("report", report_id)
+    history = (AIInsight.query.filter_by(target_type="report", target_id=report_id)
+               .order_by(AIInsight.id.desc()).limit(10).all())
+    return render_template("report_ai.html", report=row, insight=insight,
+                           history=history,
+                           body_html=(markdown_min.render(insight.output)
+                                      if insight and insight.status == "ok" else ""),
+                           ai_configured=bool(get_api_key()))
+
+
+@report_bp.route("/reports/<int:report_id>/ai", methods=["POST"])
+@login_required
+def ai_generate(report_id: int):
+    """调用大模型生成自然语言报告"""
+    row = db.session.get(Report, report_id)
+    if row is None:
+        flash("报告不存在", "warning")
+        return redirect(url_for("report.index"))
+
+    api_key = get_api_key()
+    if not api_key:
+        flash("未配置 AI API key —— 请先到「设置」页配置（核心功能不受影响）", "warning")
+        return redirect(url_for("report.ai_view", report_id=report_id))
+
+    context = extract_report_context(db.session, row.task_id)
+    if not context:
+        flash("扫描任务已不存在，无法生成 AI 解读", "warning")
+        return redirect(url_for("report.index"))
+
+    result = write_security_report(client_from_settings(api_key),
+                                   context["target"], context["summary"],
+                                   context["findings"])
+    insight = _save_insight("report", report_id, "report", result)
+
+    if result["status"] == "ok":
+        flash(f"AI 报告已生成（消耗 {insight.prompt_tokens + insight.completion_tokens} tokens）",
+              "success")
+    else:
+        flash(f"AI 生成失败：{result.get('error')}（结构化报告不受影响）", "danger")
+    return redirect(url_for("report.ai_view", report_id=report_id))
+
+
+@report_bp.route("/reports/daily")
+@login_required
+def daily_view():
+    """AI 安全日报页（近 24 小时告警归纳）"""
+    context = extract_daily_context(db.session, hours=24)
+    insight = _latest_insight("daily", 0)
+    history = (AIInsight.query.filter_by(target_type="daily", target_id=0)
+               .order_by(AIInsight.id.desc()).limit(10).all())
+    return render_template("daily_report.html", context=context, insight=insight,
+                           history=history,
+                           body_html=(markdown_min.render(insight.output)
+                                      if insight and insight.status == "ok" else ""),
+                           ai_configured=bool(get_api_key()))
+
+
+@report_bp.route("/reports/daily/ai", methods=["POST"])
+@login_required
+def daily_generate():
+    """生成 AI 安全日报"""
+    api_key = get_api_key()
+    if not api_key:
+        flash("未配置 AI API key —— 请先到「设置」页配置", "warning")
+        return redirect(url_for("report.daily_view"))
+
+    context = extract_daily_context(db.session, hours=24)
+    if not context["alerts"]:
+        flash("近 24 小时没有告警数据，先到「日志源管理」生成一些流量吧", "warning")
+        return redirect(url_for("report.daily_view"))
+
+    result = write_daily_report(client_from_settings(api_key), context["stats"],
+                                context["top_rules"], context["samples"])
+    insight = _save_insight("daily", 0, "daily", result)
+
+    if result["status"] == "ok":
+        flash(f"AI 日报已生成（消耗 {insight.prompt_tokens + insight.completion_tokens} tokens）",
+              "success")
+    else:
+        flash(f"AI 日报生成失败：{result.get('error')}", "danger")
+    return redirect(url_for("report.daily_view"))
