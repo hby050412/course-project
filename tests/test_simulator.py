@@ -9,6 +9,7 @@
 """
 import time
 import unittest
+from datetime import datetime
 
 from secplat.engine.log_parser import parse_line
 from secplat.engine.log_simulator import (SCENARIOS, generate,
@@ -116,17 +117,49 @@ class TestGenerationMechanics(unittest.TestCase):
         self.assertLessEqual(n, 120)
 
     def test_deterministic_with_seed(self):
-        a = list(generate("web_attack", rate=50, duration=1, seed=99))
-        b = list(generate("web_attack", rate=50, duration=1, seed=99))
+        """同 seed + 同 start → 完全可复现（含时间戳）
+
+        必须显式传 start：seed 只控制随机内容，起点默认为墙钟（模拟器要产出
+        「当前」日志供实时流）。此前未传 start，两次调用跨越秒边界时时间戳
+        差 1 秒而偶发失败——契约现已由 start 参数显式化。
+        """
+        base = datetime(2026, 3, 1, 8, 0, 0)
+        a = list(generate("web_attack", rate=50, duration=1, seed=99, start=base))
+        b = list(generate("web_attack", rate=50, duration=1, seed=99, start=base))
         self.assertEqual(a, b)
+        self.assertGreater(len(a), 0)
+
+    def test_seed_controls_content_start_controls_time(self):
+        """契约分工：不同 start → 内容相同、时间戳不同；不同 seed → 内容不同"""
+        base = datetime(2026, 3, 1, 8, 0, 0)
+        later = datetime(2026, 3, 1, 9, 30, 0)
+        a = list(generate("web_attack", rate=30, duration=1, seed=7, start=base))
+        b = list(generate("web_attack", rate=30, duration=1, seed=7, start=later))
+        self.assertNotEqual(a, b, "不同 start 的时间戳应不同")
+        # 去掉时间戳后内容应一致（时间在行首，取第一个 ] 之后的部分比较）
+        def payload(line):
+            return line.split("] ", 1)[-1]
+        self.assertEqual([payload(x) for x in a], [payload(x) for x in b])
+        c = list(generate("web_attack", rate=30, duration=1, seed=8, start=base))
+        self.assertNotEqual([payload(x) for x in a], [payload(x) for x in c],
+                            "不同 seed 的内容应不同")
 
     def test_no_throttle_is_fast(self):
-        """非节流模式：1000 条应在 1 秒内生成完"""
-        t0 = time.time()
-        lines = list(generate("normal", rate=1000, duration=1, seed=1))
-        elapsed = time.time() - t0
-        self.assertGreater(len(lines), 700)
-        self.assertLess(elapsed, 1.0, f"生成耗时 {elapsed:.2f}s 过慢")
+        """非节流模式：1000 条应远快于按速率节流（rate=1000 节流需 1 秒）
+
+        取 3 次采样的**最小**耗时：机器偶发负载（杀毒扫描、其他进程）只会
+        抬升单次采样，不会抬升最小值。原先用单次采样断言 <1.0s，在负载下
+        偶发失败且无法复现——正是 M5 记录的那次 flaky 失败的成因。
+        """
+        best, count = None, 0
+        for _ in range(3):
+            t0 = time.time()
+            lines = list(generate("normal", rate=1000, duration=1, seed=1))
+            elapsed = time.time() - t0
+            best = elapsed if best is None else min(best, elapsed)
+            count = len(lines)
+        self.assertGreater(count, 700)
+        self.assertLess(best, 1.0, f"生成耗时 {best:.2f}s 过慢（节流才会 >1s）")
 
     def test_timestamps_monotonic(self):
         """虚拟时钟：时间戳单调不减"""

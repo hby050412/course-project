@@ -16,10 +16,11 @@ from pathlib import Path
 
 from config import Config
 from secplat import create_app
+from secplat.blueprints.ml import _ground_truth_labels
 from secplat.engine.log_parser import parse_line
 from secplat.engine.log_simulator import generate
-from secplat.models import LogEvent, MLDetection, MLModel, db
-from secplat.pipeline import ensure_builtin_rules
+from secplat.models import Alert, LogEvent, MLDetection, MLModel, db
+from secplat.pipeline import DetectionPipeline, ensure_builtin_rules
 
 _TMPDIR = tempfile.TemporaryDirectory()
 _APP = None
@@ -125,6 +126,64 @@ class TestMLTraining(MLPageTestBase):
             self.assertIsInstance(det.top_features, list)
             self.assertGreater(len(det.top_features), 0)
             self.assertIn("feature", det.top_features[0])
+
+    def test_evaluation_metrics_and_roc_on_page(self):
+        """TC-ML-01：训练后展示 ROC/PR 数值与 ROC 曲线
+
+        对照基准 = 规则引擎告警（现场数据无人工标注）；ML 告警不参与标注，
+        避免自我循环论证——故本用例先跑检测管线产生规则告警，再训练。
+        """
+        self._seed_logs()
+        # 同一批事件灌入检测管线 → 产生规则告警，作为评估的对照基准
+        with self.app.app_context():
+            pipeline = DetectionPipeline(db.session)
+            for scenario in ("normal", "ssh_bruteforce", "port_scan"):
+                for line in generate(scenario, rate=400, duration=1, seed=23):
+                    ev = parse_line(line, "auto")
+                    if ev is not None:
+                        pipeline.feed(ev)
+            db.session.commit()
+            self.assertGreater(Alert.query.count(), 0, "未产生规则告警，基准为空")
+
+        self.client.post("/ml/train", data={"hours": 0, "window": 60},
+                         follow_redirects=True)
+        with self.app.app_context():
+            model = MLModel.query.filter_by(algo="isolation_forest").first()
+            ev = (model.metrics or {}).get("evaluation")
+            self.assertIsNotNone(ev, "训练未写入评估指标")
+            self.assertIn("auc", ev)
+            self.assertIn("precision", ev)
+            self.assertIn("recall", ev)
+            self.assertIn("roc_points", ev)
+            self.assertGreater(ev["n_positive"], 0, "正类样本为 0，指标无意义")
+            # ML 告警不得参与标注构造（防自我循环）
+            self.assertGreaterEqual(ev["basis_ips"], 1)
+
+        page = self.client.get("/ml").get_data(as_text=True)
+        self.assertIn("ROC", page)
+        self.assertIn("chartRoc", page)
+        self.assertIn(str(ev["auc"]), page)
+        self.assertIn("对照基准", page)
+
+    def test_ground_truth_labels_excludes_ml_alerts(self):
+        """标注只取规则告警：ML 告警不得进入对照基准（否则指标虚高）"""
+        with self.app.app_context():
+            Alert.query.delete()        # 清空历史告警，让本用例自洽
+            db.session.add(Alert(title="规则告警", severity="high", source_type="rule",
+                                 src_ip="10.1.1.1", status="new", count=1,
+                                 first_seen="2026-03-01T00:00:00",
+                                 last_seen="2026-03-01T00:00:00"))
+            db.session.add(Alert(title="ML 告警", severity="high", source_type="ml",
+                                 src_ip="10.2.2.2", status="new", count=1,
+                                 first_seen="2026-03-01T00:00:00",
+                                 last_seen="2026-03-01T00:00:00"))
+            db.session.commit()
+            records = [{"src_ip": "10.1.1.1"}, {"src_ip": "10.2.2.2"},
+                       {"src_ip": "10.3.3.3"}]
+            labels, ips = _ground_truth_labels(records, hours=0)
+            self.assertEqual(labels.tolist(), [1, 0, 0],
+                             "只有规则告警的 IP 应被标为正类")
+            self.assertEqual(ips, 1)
 
     def test_trained_page_shows_anomalies_with_contribution(self):
         """TC-ML-03：异常列表含特征贡献（为什么异常）"""

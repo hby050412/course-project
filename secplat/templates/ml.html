@@ -120,6 +120,44 @@
     </div>
 </div>
 
+<!-- 检测效果评估（ROC / PR）：以规则告警为对照基准 -->
+<div class="card stat-card mb-3">
+    <div class="card-header bg-white py-2">
+        检测效果评估（ROC / PR）
+        <span class="text-muted small ms-1">（对照基准：规则引擎告警——见下方说明）</span>
+    </div>
+    <div class="card-body py-3">
+        {% if evaluation and evaluation.auc is defined %}
+        <div class="row g-3 align-items-center">
+            <div class="col-lg-5">
+                <table class="table table-sm mb-2">
+                    <tbody>
+                    <tr><td>总体 AUC</td><td><strong class="text-primary">{{ evaluation.auc }}</strong></td></tr>
+                    <tr><td>精确率 Precision</td><td>{{ evaluation.precision }}</td></tr>
+                    <tr><td>召回率 Recall</td><td>{{ evaluation.recall }}</td></tr>
+                    <tr><td>F1</td><td>{{ evaluation.f1 }}</td></tr>
+                    <tr><td>样本 / 正类</td><td>{{ evaluation.n_samples }} / {{ evaluation.n_positive }}</td></tr>
+                    </tbody>
+                </table>
+                <p class="text-muted small mb-0">
+                    <strong>对照基准说明</strong>：现场数据没有人工安全标注，故以「该 IP 是否触发过
+                    <em>规则</em>告警」作为正类基准（本次涉及 {{ evaluation.basis_ips }} 个攻击源 IP）。
+                    ML 告警不参与标注，避免自我循环论证。指标衡量的是<strong>ML 与既有规则体系的一致性</strong>，
+                    不是绝对准确率；两者不一致的样本值得人工复核。
+                </p>
+            </div>
+            <div class="col-lg-7">
+                <div id="chartRoc" style="height: 260px;"></div>
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">
+            尚无评估数据（需先训练；且分析期内需存在规则告警作为对照基准）。
+        </p>
+        {% endif %}
+    </div>
+</div>
+
 <!-- 异常列表（含特征贡献解释） -->
 <div class="card stat-card">
     <div class="card-header bg-white py-2">
@@ -191,6 +229,29 @@ echarts.init(document.getElementById('chartDist')).setOption({
     series: [{type: 'bar', data: distData.map(d => d.count),
               itemStyle: {color: '#dc3545'}, barWidth: '60%'}]
 });
+
+// ---- ROC 曲线（以规则告警为对照基准）
+{% if evaluation and evaluation.roc_points is defined %}
+const rocPoints = {{ evaluation.roc_points | tojson }};
+echarts.init(document.getElementById('chartRoc')).setOption({
+    grid: {left: 55, right: 25, top: 30, bottom: 45},
+    title: {text: 'ROC 曲线（AUC = ' + {{ evaluation.auc }} + '）',
+            left: 'center', textStyle: {fontSize: 12, fontWeight: 'normal'}},
+    tooltip: {trigger: 'axis',
+              formatter: p => 'FPR ' + p[0].value[0] + '<br>TPR ' + p[0].value[1]},
+    xAxis: {type: 'value', min: 0, max: 1, name: '假阳率 FPR',
+            nameLocation: 'middle', nameGap: 25, nameTextStyle: {fontSize: 10}},
+    yAxis: {type: 'value', min: 0, max: 1, name: '真阳率 TPR',
+            nameTextStyle: {fontSize: 10}},
+    series: [
+        {type: 'line', data: rocPoints.map(p => [p.fpr, p.tpr]),
+         smooth: true, symbolSize: 4, lineStyle: {width: 2, color: '#0d6efd'},
+         itemStyle: {color: '#0d6efd'}, areaStyle: {opacity: 0.08}},
+        {type: 'line', data: [[0, 0], [1, 1]], symbol: 'none',
+         lineStyle: {type: 'dashed', width: 1, color: '#adb5bd'}}
+    ]
+});
+{% endif %}
 </script>
 {% endif %}
 {% endblock %}

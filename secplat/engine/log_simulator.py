@@ -180,17 +180,25 @@ def _gen_web_attack(rng: random.Random, dt: datetime, pid: int,
 def generate(scenario: str, rate: float = 20.0, duration: int = 60, *,
              seed: Optional[int] = None, throttle: bool = False,
              attacker_ips: Optional[List[str]] = None,
-             target_ip: Optional[str] = None) -> Iterator[str]:
+             target_ip: Optional[str] = None,
+             start: Optional[datetime] = None) -> Iterator[str]:
     """按剧本生成原始日志行。
 
     Args:
         scenario: normal / ssh_bruteforce / port_scan / web_attack
         rate: 生成速率（条/秒）
         duration: 时长（秒）→ 总条数 ≈ rate * duration（±15% 抖动）
-        seed: 随机种子（测试可复现）
+        seed: 随机种子 —— 决定**内容**（IP/用户名/payload/条数抖动）可复现
         throttle: True=按真实速率 sleep（演示实时感）；False=瞬间生成（测试/批量）
         attacker_ips: 自定义攻击者 IP 池
         target_ip: 自定义目标 IP
+        start: 起始时间戳（默认当前时间）
+
+    【契约：seed 与 start 的分工】seed 只控制随机内容，**不控制时间戳**——
+        日志模拟器要产出「当前」时间的日志供实时流演示，因此默认起点是墙钟。
+        需要完整复现（含时间戳）的调用方须显式传 start，见 tests/test_simulator.py。
+        此处曾因契约不明导致一个偶发失败的测试：同一 seed 的两次调用跨越秒边界
+        时时间戳差 1 秒——现已由 start 参数显式化。
 
     Yields:
         原始日志行（str），格式符合日志契约，可被 parse_line(line, "auto") 解析
@@ -204,7 +212,7 @@ def generate(scenario: str, rate: float = 20.0, duration: int = 60, *,
 
     total = max(1, int(int(rate * duration) * rng.uniform(0.85, 1.15)))
     step = 1.0 / rate if rate > 0 else 0.05
-    clock = datetime.now()
+    clock = start or datetime.now()
     pid = rng.randint(1000, 9999)
 
     for i in range(total):

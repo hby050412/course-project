@@ -298,6 +298,7 @@ class TestReportFlow(ReportPageTestBase):
         self.assertEqual(download.status_code, 200)
         self.assertIn("attachment", download.headers.get("Content-Disposition", ""))
         self.assertIn(".html", download.headers.get("Content-Disposition", ""))
+        download.close()   # send_file 的文件句柄需随响应关闭，否则测试进程报 ResourceWarning
 
     def test_generate_markdown(self):
         task_id = self.seed_task()

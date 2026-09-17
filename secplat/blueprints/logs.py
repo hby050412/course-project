@@ -7,6 +7,7 @@
   （需要数据库/应用上下文，因此放在蓝图层）
 """
 import threading
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List
@@ -30,6 +31,12 @@ _sim_threads: Dict[int, Dict] = {}
 _sim_lock = threading.Lock()
 
 BATCH_SIZE = 500
+
+# 批次落库的最大等待时间（秒）。只按条数触发落库时，低速率长时长的模拟器
+# （如 rate=20 × 60s，全程仅约 1200 条）会出现「页面已解析数长期为 0」——
+# 因为第一批 500 条要等 25 秒才攒够。改为条数或时间先到者触发，
+# 让"已解析"在运行过程中就可见（TC-LOG-01 要求 total_parsed 递增）。
+FLUSH_INTERVAL_SECONDS = 2.0
 
 
 # ---------------------------------------------------------------- 工具
@@ -68,6 +75,7 @@ def _run_simulator(fk_app, source_id: int) -> None:
         parsed_total = 0
         batch: List[dict] = []
         stopped = False
+        last_flush = time.monotonic()
         try:
             for line in generate(source.scenario, rate=source.rate or 20.0,
                                  duration=source.duration or 60, throttle=True):
@@ -80,12 +88,15 @@ def _run_simulator(fk_app, source_id: int) -> None:
                 feed.push(ev)                      # 实时流（页面轮询用）
                 pipeline.feed(ev)                  # 检测 → 告警（flush，随批次 commit）
                 batch.append(_event_to_row(ev, source_id))
-                if len(batch) >= BATCH_SIZE:
+                # 条数达阈值 或 距上次落库超过 FLUSH_INTERVAL_SECONDS → 落库
+                due = time.monotonic() - last_flush >= FLUSH_INTERVAL_SECONDS
+                if batch and (len(batch) >= BATCH_SIZE or due):
                     parsed_total += len(batch)
                     _flush_batch(batch)            # commit：日志与告警一并落库
                     batch = []
                     source.total_parsed = parsed_total
                     db.session.commit()
+                    last_flush = time.monotonic()
         finally:
             parsed_total += len(batch)
             _flush_batch(batch)

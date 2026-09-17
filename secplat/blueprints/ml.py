@@ -9,6 +9,8 @@
 import json
 from datetime import datetime
 
+import numpy as np
+
 from flask import (Blueprint, current_app, flash, redirect, render_template,
                    request, url_for)
 
@@ -16,7 +18,8 @@ from ..engine.ml import isolation_forest as iforest
 from ..engine.ml import kmeans as km
 from ..engine.ml.features import (FEATURE_COLUMNS, extract_ip_features,
                                   feature_matrix)
-from ..models import (DEFAULT_SETTINGS, LogEvent, MLDetection, MLModel, db)
+from ..models import (DEFAULT_SETTINGS, Alert, LogEvent, MLDetection, MLModel,
+                      db)
 from ..pipeline import generate_ml_alerts
 from ..utils.timewin import days_ago_iso
 from .auth import login_required
@@ -53,6 +56,28 @@ def _score_distribution(scores):
             for i, n in enumerate(buckets)]
 
 
+def _ground_truth_labels(records, hours: int):
+    """以**规则引擎告警**为对照基准构造标注（1 = 该 IP 在分析期内触发过规则告警）
+
+    【为什么是"对照基准"而不是"真实标注"】现场数据没有人工标注的安全标签，
+    而系统内唯一可用的既有判定就是规则引擎。因此这里衡量的是
+    「ML 与既有规则体系的一致程度」，不是绝对准确率——与《AI 输出质量评估》
+    同一方法学（那份报告也用规则级别作对照基准）。论文中如实说明该局限。
+
+    【为什么排除 source_type='ml'】ML 告警本身由孤立森林产生，拿它当标注
+    即自我循环论证，指标会虚高。故只取规则告警。
+    """
+    # 用 in_ 而非 != ：source_type 可空，SQL 的 != 会连 NULL 一起排除，
+    # 而历史告警可能没有该字段值（默认值为 rule）
+    query = Alert.query.filter(db.or_(Alert.source_type == "rule",
+                                      Alert.source_type.is_(None)))
+    if hours > 0:
+        query = query.filter(Alert.last_seen >= days_ago_iso(days=min(hours / 24, 30)))
+    attack_ips = {row.src_ip for row in query.all() if row.src_ip}
+    return np.array([1 if rec["src_ip"] in attack_ips else 0 for rec in records],
+                    dtype=int), len(attack_ips)
+
+
 # ================================================================ 页面
 
 @ml_bp.route("/ml")
@@ -86,6 +111,9 @@ def index():
     kmeans_model = _latest_model("kmeans")
     kmeans_meta = kmeans_model.metrics if kmeans_model else None
 
+    # 评估指标（AUC/ROC/PR）——以规则告警为对照基准，见 _ground_truth_labels
+    evaluation = (model.metrics or {}).get("evaluation") if model else None
+
     stats = {
         "total_samples": len(detections),
         "anomaly_count": len(anomalies),
@@ -96,7 +124,7 @@ def index():
     return render_template("ml.html", model=model, stats=stats,
                            anomalies=top_anomalies, dist=dist,
                            kmeans_model=kmeans_model, kmeans_meta=kmeans_meta,
-                           feature_labels=FEATURE_COLUMNS)
+                           evaluation=evaluation, feature_labels=FEATURE_COLUMNS)
 
 
 @ml_bp.route("/ml/train", methods=["POST"])
@@ -131,6 +159,11 @@ def train():
     model_path = current_app.config["MODEL_DIR"] / f"iforest_{ts}.joblib"
     iforest.save(artifact, model_path)
 
+    # ---- 以规则告警为对照基准评估（AUC / ROC / PR）——TC-ML-01 要求页面上可见
+    y_true, attack_ips = _ground_truth_labels(records, hours)
+    evaluation = iforest.evaluate(scores, labels, y_true)
+    evaluation["basis_ips"] = attack_ips     # 对照基准涉及的攻击源 IP 数
+
     # ---- 写模型记录
     model_row = MLModel(
         algo="isolation_forest",
@@ -138,7 +171,8 @@ def train():
         params={"n_estimators": 100, "window": window, "hours": hours},
         metrics={"samples": len(records),
                  "anomalies_at_0.6": int(labels.sum()),
-                 "score_mean": round(float(scores.mean()), 4)},
+                 "score_mean": round(float(scores.mean()), 4),
+                 "evaluation": evaluation},
         data_range=f"最近 {hours} 小时 / {len(events)} 条日志",
     )
     db.session.add(model_row)

@@ -195,8 +195,12 @@ class TestScanRunner(unittest.TestCase):
         self.assertIn("未知检测器", result.detector_stats["_not_exists"]["error"])
 
     def test_concurrency_faster_than_serial(self):
-        """3 个慢检测器并发执行：总耗时 < 串行（3×0.6s）"""
-        ids = ["_mock_slow"] * 1 + ["_mock_ok", "_mock_empty"]
+        """3 个慢检测器并发执行：总耗时 < 串行（3×0.6s）
+
+        取多次采样的**最小**耗时，避免机器偶发负载把单次采样推过阈值
+        （与 test_simulator 的非节流测试同因同治）。
+        并发失效时每次采样都是 ~1.8s，最小值同样会超阈值——门禁能力不减。
+        """
         # 用 3 个独立慢检测器验证并发
         @register_detector("_mock_slow2", "慢2")
         def _slow2(ctx):
@@ -207,9 +211,12 @@ class TestScanRunner(unittest.TestCase):
             time.sleep(0.6)
             return []
         try:
-            result = self._runner(["_mock_slow", "_mock_slow2", "_mock_slow3"],
-                                  concurrency=3).run()
-            self.assertLess(result.elapsed, 1.5, "并发未生效（应 <1.5s，串行需 1.8s）")
+            best = None
+            for _ in range(3):
+                result = self._runner(["_mock_slow", "_mock_slow2", "_mock_slow3"],
+                                      concurrency=3).run()
+                best = result.elapsed if best is None else min(best, result.elapsed)
+            self.assertLess(best, 1.5, f"并发未生效（最小耗时 {best:.2f}s，串行需 1.8s）")
         finally:
             DETECTORS.pop("_mock_slow2", None)
             DETECTORS.pop("_mock_slow3", None)

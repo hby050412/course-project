@@ -17,6 +17,7 @@ from pathlib import Path
 
 from config import Config
 from secplat import create_app
+from secplat.blueprints.logs import BATCH_SIZE
 from secplat.models import LogEvent, LogSource, db
 from secplat.utils.live_feed import feed
 
@@ -186,6 +187,38 @@ class TestSimulatorThread(LogsTestBase):
             self.assertEqual(db_total, total, "统计数与实际入库数不一致")
         # 实时流有数据（页面轮询数据源）
         self.assertGreater(feed.latest_seq(), 0)
+
+    def test_progress_visible_during_run(self):
+        """运行过程中 total_parsed 就应可见（不必等攒满 500 条批次）
+
+        缺陷回归：原先只在批次攒够 BATCH_SIZE=500 条时才落库并更新计数，
+        低速率模拟器（如 rate=20 × 60s 全程约 1200 条）在第一批攒满前
+        页面「已解析」长期显示 0——TC-LOG-01 要求 total_parsed 递增。
+        现改为「条数达阈值 或 距上次落库满 FLUSH_INTERVAL_SECONDS」先到者触发。
+        """
+        with self.app.app_context():
+            src = LogSource(name="低速长跑", source_type="simulator",
+                            scenario="normal", rate=8, duration=60)
+            db.session.add(src)
+            db.session.commit()
+            sid = src.id
+        try:
+            self.client.post(f"/logs/sources/{sid}/start")
+            # rate=8/s：3 秒约 24 条，远不足 BATCH_SIZE=500
+            time.sleep(3.0)
+            with self.app.app_context():
+                db.session.expire_all()
+                s = db.session.get(LogSource, sid)
+                mid_total = s.total_parsed or 0
+                mid_status = s.status
+            self.assertEqual(mid_status, "running", "模拟器应仍在运行")
+            self.assertGreater(mid_total, 0,
+                               "运行中 total_parsed 仍为 0——批次落库未按时间触发")
+            self.assertLess(mid_total, BATCH_SIZE,
+                            "本用例应验证「未攒满一批」的场景")
+        finally:
+            self.client.post(f"/logs/sources/{sid}/stop")
+            time.sleep(1.5)
 
     def test_duplicate_start_rejected(self):
         with self.app.app_context():
