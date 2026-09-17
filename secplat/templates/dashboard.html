@@ -45,8 +45,52 @@
     </div>
 </div>
 
-<!-- 图表区 -->
+<!-- 主被动态势（M5-4）：被动检出 + 主动发现的联动视图 -->
 <div class="row g-3 mt-1">
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value">{{ posture.alerts }}</div>
+            <div class="stat-label">被动告警</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value text-danger">{{ posture.new_alerts }}</div>
+            <div class="stat-label">未处理</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value">{{ posture.scan_findings }}</div>
+            <div class="stat-label">主动扫描发现</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value text-warning">{{ posture.exploited }}</div>
+            <div class="stat-label">已被实际攻击</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value">{{ posture.ml_anomalies }}</div>
+            <div class="stat-label">ML 行为异常</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card stat-card"><div class="card-body py-2">
+            <div class="stat-value">{{ posture.attack_ips }}</div>
+            <div class="stat-label">攻击源 IP 数</div>
+        </div></div>
+    </div>
+</div>
+<div class="small text-muted mt-1">
+    主被动联动：「已被实际攻击」= 主动扫描发现的漏洞中，被动日志里已检出同类攻击的个数
+    （详见<a href="{{ url_for('scanner.index') }}">主动扫描</a>任务详情页的闭环卡片）
+</div>
+
+<!-- 图表区 -->
+<div class="row g-3 mt-2">
     <div class="col-lg-7">
         <div class="card stat-card">
             <div class="card-header bg-white py-2">攻击时间线（最近 24 小时告警数）</div>
@@ -59,6 +103,50 @@
             <div class="card-body py-2"><div id="chartSeverity" style="height: 260px;"></div></div>
         </div>
     </div>
+
+    <!-- 来源 IP 地图（TC-DASH-03） -->
+    <div class="col-lg-8">
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2 d-flex justify-content-between">
+                <span>攻击来源地图（按省份聚合）</span>
+                <span class="small text-muted">
+                    可定位境内地址 {{ geo.located_count }} 个 ·
+                    内网 {{ geo.by_category.get('内网', 0) }} ·
+                    境外/保留/未知 {{ geo.total - geo.located_count - geo.by_category.get('内网', 0) }}
+                </span>
+            </div>
+            <div class="card-body py-2"><div id="chartMap" style="height: 380px;"></div></div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card stat-card mb-3">
+            <div class="card-header bg-white py-2">来源归属类别</div>
+            <div class="card-body py-2"><div id="chartGeoCategory" style="height: 180px;"></div></div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-header bg-white py-2">境外 / 未知来源 TOP</div>
+            <div class="card-body py-2">
+                {% if geo.overseas %}
+                <table class="table table-sm mb-0">
+                    <tbody>
+                    {% for ip, label, n in geo.overseas %}
+                    <tr><td class="mono small">{{ ip }}</td>
+                        <td class="small text-muted">{{ label }}</td>
+                        <td class="small text-end">{{ n }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="small text-muted">暂无可归类来源</div>
+                {% endif %}
+                <div class="small text-muted mt-2">
+                    归属地由内置精简 IP 库离线解析（非精确地理定位），
+                    境内条目为演示用示例段。
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="col-12">
         <div class="card stat-card">
             <div class="card-header bg-white py-2">TOP 攻击源（按告警数）</div>
@@ -81,10 +169,26 @@
 const timelineOption = {{ timeline_option | tojson }};
 const severityOption = {{ severity_pie_option | tojson }};
 const topOption = {{ top_sources_option | tojson }};
+const mapOption = {{ map_option | tojson }};
+const geoCategoryOption = {{ geo_category_option | tojson }};
 
 echarts.init(document.getElementById('chartTimeline')).setOption(timelineOption);
 echarts.init(document.getElementById('chartSeverity')).setOption(severityOption);
 echarts.init(document.getElementById('chartTop')).setOption(topOption);
+echarts.init(document.getElementById('chartGeoCategory')).setOption(geoCategoryOption);
+
+// 来源地图：先加载本地地图数据（离线可用），注册后注入 option
+fetch("{{ url_for('static', filename='js/china.json') }}")
+    .then(r => r.json())
+    .then(geoJson => {
+        echarts.registerMap('china', geoJson);
+        echarts.init(document.getElementById('chartMap')).setOption(mapOption);
+    })
+    .catch(() => {
+        document.getElementById('chartMap').innerHTML =
+            '<div class="text-muted small p-4">地图数据加载失败（static/js/china.json），' +
+            '其余图表不受影响。</div>';
+    });
 
 // 窗口尺寸变化时自适应
 window.addEventListener('resize', () => {

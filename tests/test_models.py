@@ -26,12 +26,21 @@ def build_dataset():
     """模拟器数据：正常 + 三种攻击，返回 (矩阵, 标签, 元信息, 记录列表)
 
     标签：1=攻击者 IP 的样本，0=正常
+
+    注意：每个剧本**只用一个指定攻击 IP**（attacker_ips=[ip]），使数据集与
+    模拟器默认攻击者池的增删**解耦**，同时保证攻击签名纯净——
+    否则同一 IP 会同时发起爆破/扫描/Web 攻击，特征互相污染，
+    评估指标随之失真（这类测试必须自己控制输入分布）。
     """
-    attacker_ips = {"203.0.113.5": "bruteforce", "45.155.205.233": "portscan",
-                    "89.248.165.74": "webattack"}
+    scenario_attacker = {"ssh_bruteforce": "203.0.113.5",
+                         "port_scan": "45.155.205.233",
+                         "web_attack": "89.248.165.74"}
+    attacker_ips = set(scenario_attacker.values())
     events = []
     for scenario in ("normal", "ssh_bruteforce", "port_scan", "web_attack"):
-        for line in generate(scenario, rate=600, duration=1, seed=17):
+        kwargs = ({"attacker_ips": [scenario_attacker[scenario]]}
+                  if scenario in scenario_attacker else {})
+        for line in generate(scenario, rate=600, duration=1, seed=17, **kwargs):
             ev = parse_line(line, "auto")
             if ev:
                 events.append(ev)

@@ -30,8 +30,13 @@ NORMAL_IPS = [
     "192.168.1.20", "192.168.1.21", "192.168.1.35", "192.168.1.42",
 ]
 
-# 攻击者 IP（文档示例段 + 常见扫描源段，演示用）
-ATTACKER_IPS = ["203.0.113.5", "203.0.113.66", "45.155.205.233", "89.248.165.74"]
+# 攻击者 IP（演示用）：
+#   - 文档示例段（RFC 5737）：203.0.113.x
+#   - 境外主机/扫描源段：45.155.205.x、89.248.165.x
+#   - 境内运营商段（示例）：113.108.x（广东）、171.208.x（四川）
+#     —— 来源地图（M5-4）需要能看到境内省份，故纳入两个境内示例段
+ATTACKER_IPS = ["203.0.113.5", "203.0.113.66", "45.155.205.233", "89.248.165.74",
+                "113.108.20.55", "171.208.33.7"]
 
 # 被攻击目标（模拟的服务器）
 DEFAULT_TARGET_IP = "192.168.1.100"
@@ -249,9 +254,9 @@ def generate_targeted_attacks(
         start: 起始时间（默认当前时间；闭环演示要求时间落在"现在"，便于时间线呈现）
     """
     rng = random.Random(seed)
-    src = attacker_ip or ATTACKER_IPS[0]
     clock = start or datetime.now()
     pid = rng.randint(1000, 9999)
+    line_no = 0
 
     for path, cls in targets:
         candidates = payloads_of(cls) or ATTACK_REQUESTS
@@ -259,7 +264,10 @@ def generate_targeted_attacks(
             item = candidates[i % len(candidates)]
             query = item["url"].split("?", 1)[1] if "?" in item["url"] else ""
             url = f"{path}?{query}" if query else path
+            # 攻击源轮换整个 IP 池（含境内/境外/保留段）——来源地图因此能看到多地域分布
+            src = attacker_ip or ATTACKER_IPS[line_no % len(ATTACKER_IPS)]
             yield _web_line(clock, src, item["method"], url, 200,
                             rng.choice(ATTACK_UAS), size=rng.randint(200, 3000))
             clock += timedelta(seconds=rng.uniform(0.5, 2.0))
             pid += 1
+            line_no += 1

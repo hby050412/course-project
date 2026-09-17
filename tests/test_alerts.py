@@ -231,6 +231,47 @@ class TestDashboard(AlertsPageTestBase):
         page = self.client.get("/dashboard").get_data(as_text=True)
         self.assertIn("暂无告警数据", page)
 
+    def test_dashboard_ip_map(self):
+        """TC-DASH-03：来源 IP 地图 —— 境内地址定位到省份并进入地图 option"""
+        import json
+        import re
+
+        with self.app.app_context():
+            db.session.add(make_alert(src_ip="113.108.20.55", count=5))   # 广东，5 次
+            db.session.add(make_alert(src_ip="171.208.33.7", count=2))    # 四川，2 次
+            db.session.add(make_alert(src_ip="10.0.0.5", count=1))        # 内网（不上地图）
+            db.session.commit()
+
+        page = self.client.get("/dashboard").get_data(as_text=True)
+        self.assertIn("chartMap", page)
+        self.assertIn("china.json", page)                  # 本地地图数据（离线可用）
+        self.assertIn("攻击来源地图", page)
+
+        # tojson 会把中文转义为 \uXXXX，故解析 option 而非直接匹配字符串
+        map_option = json.loads(re.search(r"const mapOption = (\{.*?\});\n",
+                                          page, re.S).group(1))
+        provinces = {d["name"]: d["value"] for d in map_option["series"][0]["data"]}
+        # 地图按"攻击次数"（告警合并计数）加权，而非简单的告警条数
+        self.assertEqual(provinces, {"广东": 5, "四川": 2})
+        self.assertEqual(map_option["series"][0]["map"], "china")
+        self.assertGreaterEqual(map_option["visualMap"]["max"], 1)
+
+        geo_option = json.loads(re.search(r"const geoCategoryOption = (\{.*?\});\n",
+                                          page, re.S).group(1))
+        categories = {d["name"]: d["value"] for d in geo_option["series"][0]["data"]}
+        self.assertEqual(categories.get("境内"), 7)        # 5 + 2（同样按攻击次数加权）
+        self.assertEqual(categories.get("内网"), 1)        # 内网单独归类，不污染地图
+
+    def test_dashboard_posture_cards(self):
+        """M5-4：主被动态势卡片（被动告警 + 主动发现 + 闭环 + ML 异常）"""
+        with self.app.app_context():
+            db.session.add(make_alert())
+            db.session.commit()
+        page = self.client.get("/dashboard").get_data(as_text=True)
+        for label in ("被动告警", "主动扫描发现", "已被实际攻击",
+                      "ML 行为异常", "攻击源 IP 数"):
+            self.assertIn(label, page)
+
 
 class TestChartUtils(unittest.TestCase):
     """图表 option 生成（纯函数）"""

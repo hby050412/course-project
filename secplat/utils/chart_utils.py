@@ -68,6 +68,48 @@ def timeline_option(points: list) -> dict:
     }
 
 
+def ip_map_option(province_counts) -> dict:
+    """来源 IP 地图 option（中国省级热力）。
+
+    入参：Counter({"广东": 3, "四川": 1, ...})（省份名与地图 GeoJSON 一致）
+    前端先加载静态地图数据并 echarts.registerMap('china', geo)，再注入本 option。
+    """
+    data = [{"name": p, "value": n} for p, n in province_counts.items()]
+    values = [n for _, n in province_counts.items()] or [0]
+    return {
+        "tooltip": {"trigger": "item", "formatter": "{b}：{c} 次攻击"},
+        "visualMap": {
+            "min": 0, "max": max(values), "left": 12, "bottom": 12,
+            "text": ["高", "低"], "calculable": True, "itemWidth": 12,
+            "inRange": {"color": ["#e7f1ff", "#dc3545"]},
+        },
+        "series": [{
+            "type": "map", "map": "china", "roam": True,
+            "emphasis": {"label": {"show": True}, "itemStyle": {"areaColor": "#ffc9c9"}},
+            "label": {"show": False},
+            "itemStyle": {"borderColor": "#adb5bd", "borderWidth": 0.5},
+            "data": data,
+        }],
+    }
+
+
+def category_pie_option(counter, labels: dict) -> dict:
+    """归属类别占比饼图 option。入参：Counter({"境内": 3, ...}) 与类别中文名映射"""
+    palette = {"内网": "#6c757d", "境内": "#0d6efd", "境外": "#dc3545",
+               "保留/文档段": "#fd7e14", "未知": "#adb5bd"}
+    data = [{"name": labels.get(k, k), "value": v,
+             "itemStyle": {"color": palette.get(k, "#adb5bd")}}
+            for k, v in counter.items() if v > 0]
+    return {
+        "tooltip": {"trigger": "item", "formatter": "{b}：{c}（{d}%）"},
+        "series": [{
+            "type": "pie", "radius": ["40%", "68%"],
+            "label": {"fontSize": 11, "formatter": "{b}: {c}"},
+            "data": data,
+        }],
+    }
+
+
 def hourly_series(alerts, hours: int = 24) -> list:
     """把告警列表按小时分桶 → [(标签, 数量)]（最近 N 小时，含空桶）"""
     now = datetime.now().replace(minute=0, second=0, microsecond=0)
